@@ -1,9 +1,20 @@
 import { application } from '@application'
 import { agentChannelService } from '@data/services/AgentChannelService'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 import { DataApiErrorFactory } from '@shared/data/api/errors'
 import type { AgentChannelEntity, UpdateAgentChannelDto } from '@shared/data/api/schemas/agentChannels'
 
 type CreateAgentChannelInput = Parameters<typeof agentChannelService.createChannel>[0]
+
+export type ChannelChangeOrigin = 'ui' | 'agent_tool'
+
+function trackChannelChange(
+  action: 'channel_disconnected' | 'channel_deleted',
+  channel: AgentChannelEntity,
+  origin: ChannelChangeOrigin
+): void {
+  trackMainProductEvent({ event: 'feature_used', feature: 'channels', action, target: channel.type, origin })
+}
 
 export function createAgentChannel(data: CreateAgentChannelInput): AgentChannelEntity {
   const channel = agentChannelService.createChannel(data)
@@ -11,16 +22,25 @@ export function createAgentChannel(data: CreateAgentChannelInput): AgentChannelE
   return channel
 }
 
-export function updateAgentChannel(channelId: string, updates: UpdateAgentChannelDto): AgentChannelEntity {
+export function updateAgentChannel(
+  channelId: string,
+  updates: UpdateAgentChannelDto,
+  origin: ChannelChangeOrigin
+): AgentChannelEntity {
+  const wasActive = agentChannelService.getChannel(channelId)?.isActive === true
   const channel = agentChannelService.updateChannel(channelId, updates)
   if (!channel) throw DataApiErrorFactory.notFound('Channel', channelId)
   application.get('ChannelManager').requestReconcile(channelId)
+  if (wasActive && !channel.isActive) trackChannelChange('channel_disconnected', channel, origin)
   return channel
 }
 
-export async function deleteAgentChannel(channelId: string): Promise<boolean> {
+/** `origin` is omitted only for internal cleanup, which is not reported. */
+export async function deleteAgentChannel(channelId: string, origin?: ChannelChangeOrigin): Promise<boolean> {
+  const channel = origin ? agentChannelService.getChannel(channelId) : null
   const deleted = agentChannelService.deleteChannel(channelId)
   if (deleted) await application.get('ChannelManager').removeChannel(channelId)
+  if (deleted && channel && origin) trackChannelChange('channel_deleted', channel, origin)
   return deleted
 }
 

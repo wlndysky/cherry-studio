@@ -12,6 +12,7 @@ import type { EventPayload } from '@shared/ipc/types'
 
 import type { ChannelAdapter, ChannelCommandEvent, ChannelMessageEvent } from './ChannelAdapter'
 import { loadChannelAdapter } from './channelAdapterLoader'
+import type { ChannelChangeOrigin } from './channelCommands'
 import { ChannelLogBuffer } from './ChannelLogBuffer'
 import { channelMessageHandler } from './ChannelMessageHandler'
 import { ChannelRegistration } from './ChannelRegistration'
@@ -28,7 +29,7 @@ export class ChannelManager extends BaseService {
   private readonly runtimes = new Map<string, ChannelRuntime>()
   private readonly channelLogs = new ChannelLogBuffer()
   // Channels a user just set up, awaiting their first connect outcome; startup reconnects never enter.
-  private readonly pendingConnectionReports = new Map<string, ChannelType>()
+  private readonly pendingConnectionReports = new Map<string, { type: ChannelType; origin: ChannelChangeOrigin }>()
   private acceptingConnections = false
 
   protected async onReady(): Promise<void> {
@@ -96,8 +97,8 @@ export class ChannelManager extends BaseService {
   }
 
   /** Report the next connect success or failure of a channel the user just set up. */
-  reportNextConnection(channelId: string, type: ChannelType): void {
-    this.pendingConnectionReports.set(channelId, type)
+  reportNextConnection(channelId: string, type: ChannelType, origin: ChannelChangeOrigin): void {
+    this.pendingConnectionReports.set(channelId, { type, origin })
   }
 
   async removeChannel(channelId: string): Promise<void> {
@@ -269,14 +270,15 @@ export class ChannelManager extends BaseService {
 
   private publishStatus(status: ChannelStatusEvent): void {
     application.get('CacheService').setShared(`channel.status.${status.channelId}`, status)
-    const type = this.pendingConnectionReports.get(status.channelId)
-    if (!type || (!status.connected && !status.error)) return
+    const report = this.pendingConnectionReports.get(status.channelId)
+    if (!report || (!status.connected && !status.error)) return
     this.pendingConnectionReports.delete(status.channelId)
     trackMainProductEvent({
       event: 'feature_used',
       feature: 'channels',
       action: 'channel_connected',
-      target: type,
+      target: report.type,
+      origin: report.origin,
       status: status.connected ? 'success' : 'error'
     })
   }

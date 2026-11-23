@@ -282,7 +282,7 @@ describe('runAgentTask', () => {
 
       const out = await runAgentTask(makeCtx())
 
-      expect(out).toEqual({ kind: 'skipped', result: 'Skipped (disabled)' })
+      expect(out).toEqual({ kind: 'skipped', result: 'Skipped (disabled)', skipReason: 'disabled' })
       expect(agentSessionService.create).not.toHaveBeenCalled()
       expect(readHeartbeat).not.toHaveBeenCalled()
     }
@@ -297,7 +297,7 @@ describe('runAgentTask', () => {
 
     const out = await runAgentTask(makeCtx())
 
-    expect(out).toEqual({ kind: 'skipped', result: 'Skipped (disabled)' })
+    expect(out).toEqual({ kind: 'skipped', result: 'Skipped (disabled)', skipReason: 'disabled' })
     expect(agentSessionService.create).not.toHaveBeenCalled()
     expect(mockStartRun).not.toHaveBeenCalled()
   })
@@ -335,7 +335,11 @@ describe('runAgentTask', () => {
 
     const out = await runAgentTask(makeCtx())
 
-    expect(out).toEqual({ kind: 'skipped', result: 'Skipped (untrusted agent data path)' })
+    expect(out).toEqual({
+      kind: 'skipped',
+      result: 'Skipped (untrusted agent data path)',
+      skipReason: 'untrusted_path'
+    })
     expect(agentSessionService.create).not.toHaveBeenCalled()
     expect(readHeartbeat).not.toHaveBeenCalled()
     // Reconcile immediately so repairing the directory can re-arm the schedule.
@@ -360,7 +364,11 @@ describe('runAgentTask', () => {
     vi.mocked(agentService.getAgent).mockReturnValueOnce(makeAgent())
     mockAssertAgentStorageDirectory.mockRejectedValueOnce(new Error('untrusted path'))
 
-    expect(await runAgentTask(makeCtx())).toEqual({ kind: 'skipped', result: 'Skipped (untrusted agent data path)' })
+    expect(await runAgentTask(makeCtx())).toEqual({
+      kind: 'skipped',
+      result: 'Skipped (untrusted agent data path)',
+      skipReason: 'untrusted_path'
+    })
     expect(mockUpdateJobScheduleTx).not.toHaveBeenCalled()
     expect(syncHeartbeatScheduleMock).not.toHaveBeenCalled()
   })
@@ -373,7 +381,7 @@ describe('runAgentTask', () => {
 
     const out = await runAgentTask(makeCtx())
 
-    expect(out).toEqual({ kind: 'skipped', result: 'Skipped (no file)' })
+    expect(out).toEqual({ kind: 'skipped', result: 'Skipped (no file)', skipReason: 'no_file' })
     expect(agentSessionService.create).not.toHaveBeenCalled()
   })
 
@@ -517,7 +525,7 @@ describe('runAgentTask', () => {
         makeCtx({ input: { agentId: 'a1', prompt: 'hi', timeoutMinutes: 0, workspace: { type: 'system' } } })
       )
 
-      expect(out).toEqual({ kind: 'skipped', result: 'Skipped (session busy)' })
+      expect(out).toEqual({ kind: 'skipped', result: 'Skipped (session busy)', skipReason: 'session_busy' })
       expect(mockStartRun).toHaveBeenCalledWith(expect.objectContaining({ sessionId: 'sess-sticky' }))
       expect(mockStartRun).toHaveBeenCalledWith(expect.objectContaining({ requireIdle: { expectedAgentId: 'a1' } }))
       expect(mockAbort).not.toHaveBeenCalled()

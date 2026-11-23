@@ -4,7 +4,9 @@ import type { PostHog } from 'posthog-node'
 import { application } from '@application'
 import type { AnalyticsClient, TokenUsageData } from '@cherrystudio/analytics-client'
 import { isMigratedFromV1 } from '@data/migration/v1MigrationOrigin'
+import { agentChannelService } from '@data/services/AgentChannelService'
 import { agentService } from '@data/services/AgentService'
+import { agentTaskService } from '@data/services/AgentTaskService'
 import { assistantDataService } from '@data/services/AssistantService'
 import { messageService } from '@data/services/MessageService'
 import { loggerService } from '@logger'
@@ -395,6 +397,17 @@ export class AnalyticsService extends BaseService implements Activatable {
       this.trackProductEvent({ event: 'agent_snapshot', ...agentService.countForAnalytics() })
     } catch (error) {
       logger.warn('Agent snapshot skipped', error as Error)
+    }
+    try {
+      this.trackProductEvent({
+        event: 'scheduled_task_snapshot',
+        ...agentTaskService.countForAnalytics(),
+        ...agentChannelService.countForAnalytics(
+          (id) => application.get('ChannelManager').getAdapter(id)?.connected === true
+        )
+      })
+    } catch (error) {
+      logger.warn('Scheduled task snapshot skipped', error as Error)
     }
   }
 
