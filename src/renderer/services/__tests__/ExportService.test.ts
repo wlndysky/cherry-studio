@@ -1616,6 +1616,13 @@ describe('ExportService image capture serialization', () => {
       expect(capturedNoteSurface).toBe(replacementNote.scrollable)
       expect(capturedNoteSurface).not.toBe(originalNote.scrollable)
       expect(saveImage).toHaveBeenCalledWith('Note', 'data:image/png;base64,note')
+      expect(imageCaptureMocks.request).toHaveBeenCalledWith('analytics.track', {
+        event: 'feature_used',
+        feature: 'notes',
+        action: 'exported',
+        target: 'image',
+        status: 'success'
+      })
     } finally {
       releaseFirstCanvas.resolve()
       blocker.remove()

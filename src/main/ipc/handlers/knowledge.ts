@@ -1,6 +1,6 @@
 import { application } from '@application'
 import { t } from '@main/i18n'
-import { trackMainProductEvent } from '@main/services/productAnalytics'
+import { trackKnowledgeItemsAdded, trackMainProductEvent } from '@main/services/productAnalytics'
 import { ErrorCode, isDataApiError } from '@shared/data/api/errors'
 import { IpcError } from '@shared/ipc/errors/IpcError'
 import { knowledgeErrorCodes } from '@shared/ipc/errors/knowledge'
@@ -33,7 +33,10 @@ export const knowledgeHandlers: IpcHandlersFor<typeof knowledgeRequestSchemas> =
     }
     const result = await application.get('KnowledgeService').addItems(baseId, items, conflictStrategy)
     if (result.status === 'added') {
-      trackMainProductEvent({ event: 'feature_used', feature: 'knowledge', action: 'items_added', count: items.length })
+      trackKnowledgeItemsAdded(
+        items.map((item) => item.type),
+        'ui'
+      )
     }
     return result
   },
@@ -47,7 +50,13 @@ export const knowledgeHandlers: IpcHandlersFor<typeof knowledgeRequestSchemas> =
     application.get('KnowledgeService').enableEmbeddingModel(baseId, patch),
   'knowledge.search': async ({ baseId, query }) => {
     const report = (status: 'success' | 'error') =>
-      trackMainProductEvent({ event: 'feature_used', feature: 'knowledge', action: 'searched', status })
+      trackMainProductEvent({
+        event: 'feature_used',
+        feature: 'knowledge',
+        action: 'searched',
+        status,
+        trigger: 'page'
+      })
     try {
       const results = await application.get('KnowledgeService').search(baseId, query)
       report('success')

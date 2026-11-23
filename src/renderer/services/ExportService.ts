@@ -20,6 +20,7 @@ import i18n from '@renderer/i18n/resolver'
 import { ipcApi } from '@renderer/ipc'
 import { openRoute } from '@renderer/services/mainWindowNavigation'
 import { addNote } from '@renderer/services/NotesService'
+import { trackProductEvent } from '@renderer/services/productAnalytics'
 import { toast } from '@renderer/services/toast'
 import type {
   ExportableMessage,
@@ -1654,7 +1655,23 @@ interface NoteExportOptions {
   platform: 'markdown' | 'docx' | 'notion' | 'yuque' | 'joplin' | 'siyuan' | 'copyImage' | 'exportImage'
 }
 
-export const exportNote = async ({ node, platform }: NoteExportOptions): Promise<void> => {
+const NOTE_IMAGE_EXPORT_TARGETS = { copyImage: 'copy_image', exportImage: 'image' } as const
+
+export const exportNote = async (options: NoteExportOptions): Promise<void> => {
+  const { platform } = options
+  const target = platform === 'copyImage' || platform === 'exportImage' ? NOTE_IMAGE_EXPORT_TARGETS[platform] : platform
+  const report = (status: 'success' | 'error') =>
+    trackProductEvent({ event: 'feature_used', feature: 'notes', action: 'exported', target, status })
+  try {
+    await exportNoteTo(options)
+    report('success')
+  } catch (error) {
+    report('error')
+    throw error
+  }
+}
+
+const exportNoteTo = async ({ node, platform }: NoteExportOptions): Promise<void> => {
   try {
     const content = await window.api.file.readExternal(node.externalPath)
 

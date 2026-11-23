@@ -313,6 +313,7 @@ describe('SelectionService macOS toolbar', () => {
       calculateToolbarPosition: () => { x: number; y: number }
       getToolbarRealSize: () => { toolbarWidth: number; toolbarHeight: number }
       showToolbarAtPosition: (point: { x: number; y: number }, orientation: string, programName: string) => void
+      flushToolbarShown: () => void
     }
     access.toolbarWindow = toolbarWindow
     vi.spyOn(access, 'calculateToolbarPosition').mockReturnValue({ x: 10, y: 20 })
@@ -356,6 +357,20 @@ describe('SelectionService macOS toolbar', () => {
       skipTransformProcessType: true
     })
     expect(toolbarWindow.showInactive).toHaveBeenCalledOnce()
+  })
+
+  it('reports toolbar shows as one hourly count, never per show or with the app name', () => {
+    const { access } = createToolbarHarness()
+    const track = vi.mocked(application.get('AnalyticsService').trackProductEvent)
+
+    for (let i = 0; i < 3; i++) access.showToolbarAtPosition({ x: 10, y: 20 }, 'bottomLeft', 'com.example.Private')
+    expect(track).not.toHaveBeenCalled()
+    access.flushToolbarShown()
+    access.flushToolbarShown()
+
+    expect(track.mock.calls).toEqual([
+      [{ event: 'feature_used', feature: 'selection', action: 'toolbar_shown', count: 3 }]
+    ])
   })
 })
 

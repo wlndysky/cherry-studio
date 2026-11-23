@@ -8,6 +8,7 @@ import {
   type UpdateAgentDto
 } from '@shared/data/api/schemas/agents'
 import type { MainAnalyticsEvent } from '@shared/ipc/schemas/analytics'
+import type { DoctorFixRequest, DoctorFixResult, DoctorRunResult, DoctorRunTier } from '@shared/types/doctor'
 
 export { analyticsModelSource } from '@shared/utils/analyticsModelSource'
 
@@ -30,6 +31,60 @@ export function trackAgentSessionCreated(agentId: string): void {
     trackMainProductEvent({ event: 'agent_session_created', agentKind: analyticsAgentKind(agentId) })
   } catch {
     // Reading the agent must not fail session creation.
+  }
+}
+
+/** One event per item type, so files, URLs, notes, and folders count separately. */
+export function trackKnowledgeItemsAdded(types: readonly string[], origin: 'ui' | 'agent_tool'): void {
+  const counts = new Map<string, number>()
+  for (const type of types) counts.set(type, (counts.get(type) ?? 0) + 1)
+  for (const [target, count] of counts) {
+    trackMainProductEvent({ event: 'feature_used', feature: 'knowledge', action: 'items_added', target, count, origin })
+  }
+}
+
+/** Reports how a Doctor run ended and how many checks failed or warned; never the findings. */
+export async function reportDiagnosticsRun(
+  tier: DoctorRunTier,
+  origin: 'ui' | 'agent_tool',
+  run: () => Promise<DoctorRunResult>
+): Promise<DoctorRunResult> {
+  try {
+    const result = await run()
+    if (result.status === 'completed') {
+      const { fail, warn } = result.report.summary
+      trackMainProductEvent({
+        event: 'diagnostics_run',
+        tier,
+        status: 'completed',
+        failCount: fail,
+        warnCount: warn,
+        origin
+      })
+    } else if (result.status === 'canceled') {
+      trackMainProductEvent({ event: 'diagnostics_run', tier, status: 'canceled', origin })
+    }
+    return result
+  } catch (error) {
+    trackMainProductEvent({ event: 'diagnostics_run', tier, status: 'failed', origin })
+    throw error
+  }
+}
+
+export async function reportDiagnosticsFix(
+  request: DoctorFixRequest,
+  origin: 'ui' | 'agent_tool',
+  fix: () => Promise<DoctorFixResult>
+): Promise<DoctorFixResult> {
+  const track = (result: 'fixed' | 'requires_relaunch' | 'failed' | 'stale') =>
+    trackMainProductEvent({ event: 'diagnostics_fix', check: request.checkId, fix: request.fixId, result, origin })
+  try {
+    const result = await fix()
+    track(result.status)
+    return result
+  } catch (error) {
+    track('failed')
+    throw error
   }
 }
 

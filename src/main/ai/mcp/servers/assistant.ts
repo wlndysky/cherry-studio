@@ -13,6 +13,7 @@ import { providerService } from '@data/services/ProviderService'
 import { loggerService } from '@logger'
 import { createAgent as createAgentCommand } from '@main/ai/agents/createAgent'
 import { type AssistantToolName, DEFAULT_ASSISTANT_TOOL_NAMES } from '@main/ai/toolApproval/assistantToolNames'
+import { reportDiagnosticsRun } from '@main/services/productAnalytics'
 import { providerChatBaseUrl } from '@main/utils/providerEndpoint'
 import { ErrorCode as DataApiErrorCode, isDataApiError } from '@shared/data/api/errors'
 import { ThemeMode } from '@shared/data/preference/preferenceTypes'
@@ -509,7 +510,9 @@ async function diagnoseHealth(providerId: string, signal: AbortSignal): Promise<
 
 /** The System Doctor report in its `upload` projection: nothing local-only reaches the model. */
 async function diagnoseDoctor(tier: DoctorRunTier): Promise<CallToolResult> {
-  const outcome = await application.get('DoctorService').run({ tier, subject: { kind: 'global' } })
+  const outcome = await reportDiagnosticsRun(tier, 'agent_tool', () =>
+    application.get('DoctorService').run({ tier, subject: { kind: 'global' } })
+  )
   if (outcome.status !== 'completed') return jsonResult(outcome)
   return jsonResult(projectDoctorReport(outcome.report, 'upload'))
 }

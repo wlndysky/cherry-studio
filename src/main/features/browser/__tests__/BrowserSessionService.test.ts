@@ -1,7 +1,7 @@
 import { EventEmitter } from 'node:events'
 
 import { setupTestDatabase } from '@test-helpers/db'
-import { app, session } from 'electron'
+import { app, type BrowserWindow, dialog, session } from 'electron'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 import { application } from '@application'
@@ -241,6 +241,40 @@ describe('Ordinary browser popup lifecycle', () => {
     expect(handler({ url } as Electron.HandlerDetails)).toEqual({ action: 'deny' })
     expect(openTab).not.toHaveBeenCalled()
     expect(mock.isDestroyed()).toBe(false)
+  })
+})
+
+describe('Browser data import analytics', () => {
+  const reported = () =>
+    vi
+      .mocked(application.get('AnalyticsService').trackProductEvent)
+      .mock.calls.map(([event]) => event)
+      .filter((event) => event.event === 'data_imported')
+  const options = { history: true, cookies: true, localStorage: false, domains: [] }
+  const category = (imported: number) => ({ imported, skipped: 0, failed: 0, unsupported: false })
+
+  beforeEach(() => vi.mocked(application.get('AnalyticsService').trackProductEvent).mockClear())
+
+  it('reports a cancelled pick, an import with its total count, and a failed import', async () => {
+    vi.spyOn(dialog, 'showOpenDialog').mockResolvedValueOnce({ canceled: true, filePaths: [] })
+    await service.pickAndImport(options, {} as BrowserWindow)
+    vi.spyOn(service, 'runImport').mockResolvedValueOnce({
+      cancelled: false,
+      history: category(3),
+      cookies: category(2),
+      localStorage: category(0)
+    })
+    await service.pickAndImport({ ...options, sourceId: 'chrome:Default' }, {} as BrowserWindow)
+    vi.spyOn(service, 'runImport').mockRejectedValueOnce(new Error('Browser profile is no longer available'))
+    await expect(
+      service.pickAndImport({ ...options, sourceId: 'chrome:Default' }, {} as BrowserWindow)
+    ).rejects.toThrow('no longer available')
+
+    expect(reported()).toEqual([
+      { event: 'data_imported', source: 'browser', status: 'cancelled' },
+      { event: 'data_imported', source: 'browser', status: 'success', count: 5 },
+      { event: 'data_imported', source: 'browser', status: 'error', errorReason: 'other' }
+    ])
   })
 })
 

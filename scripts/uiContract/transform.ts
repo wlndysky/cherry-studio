@@ -400,6 +400,7 @@ export function transformJsx(source: string, options: TransformJsxOptions): UiSo
   // MagicString accepts directly. Keep source edits behind one offset helper.
   const spanToCharacter = (offset: number): number => offset
   const descriptors: UiNodeDescriptor[] = []
+  const analyticsNames: string[] = []
   const runtimeImports = new Set<'mergeDataUi' | 'mergeUiProps' | 'UiDataSlot'>()
 
   function expressionSource(span: Span): string {
@@ -539,6 +540,7 @@ export function transformJsx(source: string, options: TransformJsxOptions): UiSo
     if (!ANALYTICS_NAME.test(name)) return
     const nameSpan = requiredSpan(opening.name, `JSX element-name for ${info.element}`)
     magicString.appendLeft(spanToCharacter(nameSpan.end), ` data-analytics=${JSON.stringify(name)}`)
+    analyticsNames.push(name)
   }
 
   function shouldWrapAsChildContent(opening: JSXOpeningElement): boolean {
@@ -674,6 +676,7 @@ export function transformJsx(source: string, options: TransformJsxOptions): UiSo
   return {
     code: options.injectDataUi ? magicString.toString() : source,
     descriptors,
+    analyticsNames,
     map: options.injectDataUi
       ? magicString.generateMap({
           file: options.sourceFile,
@@ -830,6 +833,7 @@ export function transformHtml(source: string, options: TransformHtmlOptions): Ui
   return {
     code: options.injectDataUi ? magicString.toString() : source,
     descriptors,
+    analyticsNames: [],
     map: null
   }
 }
