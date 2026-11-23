@@ -25,6 +25,7 @@ import { DataApiErrorFactory, ErrorCode, isDataApiError } from '@shared/data/api
 import type { AgentSessionMessageEntity } from '@shared/data/api/schemas/agentSessionMessages'
 import type { CherryMessagePart, CherryUIMessage, MessageSnapshot } from '@shared/data/types/message'
 import { parseUniqueModelId, type ServiceTierSelection, type UniqueModelId } from '@shared/data/types/model'
+import type { AgentTurnSource } from '@shared/ipc/schemas/analytics'
 import type { ReasoningEffortOption } from '@shared/types/aiSdk'
 
 import { validateEditedInput } from '../../agentSession/editInput'
@@ -67,6 +68,7 @@ export type ValidatedAgentDispatch = {
   serviceTier: ServiceTierSelection
   fastMode?: boolean
   headless: boolean
+  turnSource?: AgentTurnSource
   /** Undefined resolves the linked source channel; [] intentionally grants no notification recipients. */
   trustedNotifyChannels?: readonly NotifyChannel[]
   messageSnapshot: MessageSnapshot
@@ -189,6 +191,7 @@ export class AgentChatContextProvider implements ChatContextProvider {
       serviceTier: req.serviceTier ?? agent.configuration?.service_tier ?? 'standard',
       fastMode: req.fastMode,
       headless: isHeadless,
+      ...(req.turnSource ? { turnSource: req.turnSource } : {}),
       ...(authority.trustedNotifyChannels !== undefined
         ? { trustedNotifyChannels: authority.trustedNotifyChannels }
         : {}),
@@ -302,6 +305,7 @@ export class AgentChatContextProvider implements ChatContextProvider {
         assistantMessageId,
         userMessage,
         headless: validated.headless,
+        turnSource: validated.turnSource,
         trustedNotifyChannels: validated.trustedNotifyChannels,
         traceId,
         messageSnapshot: validated.messageSnapshot,
@@ -428,6 +432,7 @@ export class AgentChatContextProvider implements ChatContextProvider {
 
       application.get('AgentSessionRuntimeService').enqueueUserMessage(validated.sessionId, savedUserMessage, {
         headless: validated.headless,
+        turnSource: validated.turnSource,
         trustedNotifyChannels: validated.trustedNotifyChannels,
         messageSnapshot: validated.messageSnapshot,
         reasoningEffort: validated.reasoningEffort,

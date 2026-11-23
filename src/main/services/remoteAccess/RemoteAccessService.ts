@@ -3,6 +3,7 @@ import { powerMonitor } from 'electron'
 import { application } from '@application'
 import { isUploadChunk } from '@cherrystudio/remote-protocol'
 import { remoteLimits, type RemoteCapability } from '@cherrystudio/remote-protocol'
+import { RemoteRpcError } from '@cherrystudio/remote-transport'
 import {
   acceptSecureChannel,
   type ChannelOptions,
@@ -14,6 +15,7 @@ import { agentSessionService } from '@data/services/AgentSessionService'
 import { remoteCommandService } from '@data/services/RemoteCommandService'
 import { loggerService } from '@logger'
 import { BaseService, DependsOn, type Disposable, Injectable, Phase, ServicePhase } from '@main/core/lifecycle'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 
 import { RemoteAgentHub } from './agentJournal'
 import { loadDesktopIdentity } from './deviceIdentity'
@@ -133,7 +135,14 @@ export class RemoteAccessService extends BaseService {
     return this.pairing.pending()
   }
   decidePairing(claimId: string, capabilities: RemoteCapability[] | null): void {
-    this.pairing.decide(claimId, capabilities)
+    try {
+      this.pairing.decide(claimId, capabilities)
+    } catch (error) {
+      const expired = error instanceof RemoteRpcError && (error.data as { reason?: string })?.reason === 'NOT_FOUND'
+      trackMainProductEvent({ event: 'remote_paired', result: expired ? 'expired' : 'error' })
+      throw error
+    }
+    trackMainProductEvent({ event: 'remote_paired', result: capabilities ? 'approved' : 'rejected' })
     application.get('IpcApiService').broadcast('api_gateway.remote.pairing_changed', undefined)
   }
 

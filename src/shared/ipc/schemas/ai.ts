@@ -49,6 +49,7 @@ import { ReasoningEffortOptionSchema } from '@shared/types/aiSdk'
 import { AbsoluteFilePathSchema, FileVersionSchema } from '@shared/types/file'
 
 import { defineRoute } from '../define'
+import { agentCreateAnalyticsSchema } from './analytics'
 import { ImageBytesSchema } from './entityImage'
 
 /**
@@ -89,7 +90,9 @@ export const CreateAgentCommandSchema = AgentBaseSchema.extend({
    * Create-only: ids of pre-existing global skills to enable for the new
    * Agent. Join rows are written in the same DB transaction as the Agent.
    */
-  skillIds: AgentSkillIdSetSchema.optional()
+  skillIds: AgentSkillIdSetSchema.optional(),
+  /** Analytics only: which UI created the Agent; stripped before persistence. */
+  analytics: agentCreateAnalyticsSchema.optional()
 })
 export type CreateAgentCommand = z.infer<typeof CreateAgentCommandSchema>
 

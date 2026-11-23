@@ -8,6 +8,7 @@
 
 import { agentService } from '@data/services/AgentService'
 import { agentTaskService as taskService } from '@data/services/AgentTaskService'
+import { trackAgentSettingChanges, trackMainProductEvent } from '@main/services/productAnalytics'
 import { DataApiErrorFactory, toDataApiError } from '@shared/data/api/errors'
 import { OrderBatchRequestSchema, OrderRequestSchema } from '@shared/data/api/schemas/_endpointHelpers'
 import {
@@ -77,8 +78,18 @@ export const agentHandlers: HandlersFor<AgentSchemas> = {
     PATCH: async ({ params, body }) => {
       const parsed = UpdateAgentSchema.safeParse(body)
       if (!parsed.success) throw toDataApiError(parsed.error)
+      const before = agentService.getAgent(params.agentId)
       const agent = agentService.updateAgent(params.agentId, parsed.data)
       if (!agent) throw DataApiErrorFactory.notFound('Agent', params.agentId)
+      if (before) trackAgentSettingChanges(before, agent, parsed.data)
+      for (const update of parsed.data.skillUpdates ?? []) {
+        trackMainProductEvent({
+          event: 'feature_used',
+          feature: 'skills',
+          action: update.isEnabled ? 'skill_enabled' : 'skill_disabled',
+          origin: 'ui'
+        })
+      }
       return agent
     }
   },

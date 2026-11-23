@@ -1891,6 +1891,44 @@ describe('AgentService', () => {
     })
   })
 
+  describe('countForAnalytics', () => {
+    it('counts live agents by runtime, mode, kind, heartbeat, and channels, skipping trash and Doctor', async () => {
+      await insertAgent({ id: 'plain', configuration: { heartbeat_enabled: false } })
+      await insertAgent({
+        id: 'pi-plan',
+        type: 'pi',
+        configuration: { permission_mode: 'plan', heartbeat_enabled: true }
+      })
+      await insertAgent({
+        id: 'cherry',
+        configuration: { builtin_role: 'assistant', permission_mode: 'auto', heartbeat_enabled: false }
+      })
+      await insertAgent({ id: 'trashed', deletedAt: Date.now(), configuration: { heartbeat_enabled: false } })
+      await insertAgent({ id: 'doctor', configuration: { builtin_role: 'doctor', heartbeat_enabled: false } })
+      await dbh.db.insert(agentChannelTable).values({
+        id: 'channel-1',
+        type: 'telegram',
+        name: 'Ops',
+        agentId: 'pi-plan',
+        workspace: { type: 'system' },
+        config: {}
+      })
+
+      expect(agentService.countForAnalytics()).toEqual({
+        agentCount: 3,
+        heartbeatCount: 1,
+        withChannelCount: 1,
+        'type:claude-code': 2,
+        'type:pi': 1,
+        'permission:default': 1,
+        'permission:plan': 1,
+        'permission:auto': 1,
+        'kind:custom': 2,
+        'kind:builtin': 1
+      })
+    })
+  })
+
   describe('listAgents', () => {
     it('filters by builtin role, matching Support only on its reserved ID', async () => {
       await insertAgent({ id: 'plain' })

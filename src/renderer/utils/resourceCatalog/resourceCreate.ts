@@ -2,6 +2,8 @@ import type { ResourceCreateValues } from '@renderer/types/resourceCatalog'
 import { AGENT_RUNTIME_CAPABILITIES } from '@shared/ai/agentRuntimeCapabilities'
 import type { CreateAssistantDto } from '@shared/data/api/schemas/assistants'
 import type { CreateAgentCommand } from '@shared/ipc/schemas/ai'
+import type { AgentCreateAnalytics } from '@shared/ipc/schemas/analytics'
+import { ANALYTICS_PRESET_ID_PATTERN } from '@shared/utils/analyticsModelSource'
 
 /** Map the shared create-wizard values to the Assistant DataApi contract. */
 export function buildCreateAssistantDto(values: ResourceCreateValues): CreateAssistantDto {
@@ -15,8 +17,11 @@ export function buildCreateAssistantDto(values: ResourceCreateValues): CreateAss
   }
 }
 
-/** Map the shared create-wizard values to the Agent creation command. */
-export function buildCreateAgentCommand(values: ResourceCreateValues): CreateAgentCommand {
+/** Map the shared create-wizard values to the Agent creation command; `analytics` names the creating UI. */
+export function buildCreateAgentCommand(
+  values: ResourceCreateValues,
+  analytics?: { entry: AgentCreateAnalytics['entry']; templateId?: string }
+): CreateAgentCommand {
   const caps = AGENT_RUNTIME_CAPABILITIES[values.agentType]
   const permissionMode = caps.permissionModes.some((mode) => mode === values.permissionMode)
     ? values.permissionMode
@@ -34,6 +39,14 @@ export function buildCreateAgentCommand(values: ResourceCreateValues): CreateAge
     configuration: {
       avatar: values.avatar,
       permission_mode: permissionMode
-    }
+    },
+    ...(analytics && {
+      analytics: {
+        entry: analytics.entry,
+        // Only static template ids; anything else would fail the create command's schema.
+        ...(analytics.templateId &&
+          ANALYTICS_PRESET_ID_PATTERN.test(analytics.templateId) && { target: analytics.templateId })
+      }
+    })
   }
 }

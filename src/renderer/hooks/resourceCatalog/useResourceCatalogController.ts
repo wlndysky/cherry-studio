@@ -339,7 +339,7 @@ export function useResourceCatalogController(
           await createAssistant(buildCreateAssistantDto(values))
           trackAssistantCreated('blank')
         } else {
-          await createAgent(buildCreateAgentCommand(values))
+          await createAgent(buildCreateAgentCommand(values, { entry: 'library' }))
         }
 
         setCreateDialogOpen(false)

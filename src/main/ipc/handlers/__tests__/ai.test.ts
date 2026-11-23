@@ -95,6 +95,7 @@ const claudeCodeWarmQueryManager = { prewarmAgentSession: vi.fn(), closeAgentSes
 const agentSessionRuntimeService = { acquireWarmLease: vi.fn(), releaseWarmLease: vi.fn(), forkSession: vi.fn() }
 const agentLifecycleService = {
   archiveSessions: vi.fn(),
+  purgeSessions: vi.fn(),
   restoreSession: vi.fn(),
   reuseOrCreateSession: vi.fn(),
   archiveAgent: vi.fn(),
@@ -108,7 +109,8 @@ const agentJobsService = {
   pauseTask: vi.fn(),
   resumeTask: vi.fn(),
   deleteTask: vi.fn(),
-  runTask: vi.fn()
+  runTask: vi.fn(),
+  runHeartbeat: vi.fn()
 }
 
 // WebContentsListener (constructed in the stream_open handler) wires once()/isDestroyed().
@@ -689,11 +691,42 @@ describe('aiHandlers — agent sessions & tasks', () => {
     analyticsService.trackProductEvent.mockClear()
 
     await aiHandlers['ai.agent.session.reuse_or_create'](input, ctx)
-    expect(analyticsService.trackProductEvent).not.toHaveBeenCalled()
     await aiHandlers['ai.agent.session.reuse_or_create'](input, ctx)
+    expect(analyticsService.trackProductEvent.mock.calls.map(([event]) => event)).toEqual([
+      { event: 'agent_session_action', action: 'reuse', status: 'success', count: 1 },
+      { event: 'agent_session_created', agentKind: 'builtin' }
+    ])
+  })
+
+  it('reports session archive, purge, and fork outcomes with how many sessions they touched', async () => {
+    analyticsService.trackProductEvent.mockClear()
+    agentLifecycleService.archiveSessions.mockResolvedValueOnce({ deletedIds: ['a', 'b'] })
+    agentLifecycleService.purgeSessions.mockRejectedValueOnce(new Error('disk'))
+    agentSessionRuntimeService.forkSession.mockResolvedValueOnce('child')
+
+    await aiHandlers['ai.agent.session.delete']({ sessionIds: ['a', 'b'] }, ctx)
+    await expect(aiHandlers['ai.agent.session.delete']({ sessionIds: ['c'], permanent: true }, ctx)).rejects.toThrow(
+      'disk'
+    )
+    await aiHandlers['ai.agent.session.fork']({ sourceSessionId: 'source', messageId: 'm' }, ctx)
+
+    expect(analyticsService.trackProductEvent.mock.calls.map(([event]) => event)).toEqual([
+      { event: 'agent_session_action', action: 'archive', status: 'success', count: 2 },
+      { event: 'agent_session_action', action: 'purge', status: 'error', count: 1 },
+      { event: 'agent_session_action', action: 'fork', status: 'success', count: 1 }
+    ])
+  })
+
+  it('reports a manual heartbeat run with its outcome', async () => {
+    analyticsService.trackProductEvent.mockClear()
+    agentJobsService.runHeartbeat.mockResolvedValueOnce('busy')
+
+    await expect(aiHandlers['ai.agent.heartbeat.run']({ agentId: 'agent-1' }, ctx)).resolves.toBe('busy')
     expect(analyticsService.trackProductEvent).toHaveBeenCalledWith({
-      event: 'agent_session_created',
-      agentKind: 'builtin'
+      event: 'agent_context_event',
+      action: 'heartbeat_run',
+      trigger: 'manual',
+      result: 'busy'
     })
   })
 

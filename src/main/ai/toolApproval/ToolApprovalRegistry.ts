@@ -25,18 +25,20 @@ type PendingApproval = {
   toolName: string
   originalInput: Record<string, unknown>
   presentation: 'stream' | 'message' | 'application'
+  registeredAt: number
   resolve: (decision: DispatchDecision) => void
   signal?: AbortSignal
   abortListener?: () => void
 }
 
 type ApprovalRegistration = Pick<PendingApproval, 'sessionId' | 'toolCallId' | 'presentation'>
-type PendingApprovalRegistration = Omit<PendingApproval, 'abortListener' | 'presentation'> & {
+type DispatchedApproval = ApprovalRegistration & Pick<PendingApproval, 'toolName' | 'registeredAt'>
+type PendingApprovalRegistration = Omit<PendingApproval, 'abortListener' | 'presentation' | 'registeredAt'> & {
   presentation?: PendingApproval['presentation']
 }
 
 /** An approval killed without a user decision — see `ToolApprovalRegistry.onAborted`. */
-export type AbortedApproval = ApprovalRegistration & {
+export type AbortedApproval = DispatchedApproval & {
   approvalId: string
   /** The reason handed to the driver that was waiting on this approval. */
   reason: string
@@ -78,7 +80,7 @@ class ToolApprovalRegistry {
       return false
     }
 
-    const stored: PendingApproval = { ...entry, presentation: entry.presentation ?? 'stream' }
+    const stored: PendingApproval = { ...entry, presentation: entry.presentation ?? 'stream', registeredAt: Date.now() }
     if (signal) {
       const abortListener = () => this.cancel([approvalId], 'aborted')
       stored.abortListener = abortListener
@@ -101,7 +103,7 @@ class ToolApprovalRegistry {
   }
 
   /** Returns `undefined` for unknown ids (already dispatched / session expired). */
-  dispatch(approvalId: string, decision: DispatchDecision): ApprovalRegistration | undefined {
+  dispatch(approvalId: string, decision: DispatchDecision): DispatchedApproval | undefined {
     const entry = this.pending.get(approvalId)
     if (!entry) return undefined
     this.pending.delete(approvalId)
@@ -110,7 +112,9 @@ class ToolApprovalRegistry {
     return {
       sessionId: entry.sessionId,
       toolCallId: entry.toolCallId,
-      presentation: entry.presentation
+      presentation: entry.presentation,
+      toolName: entry.toolName,
+      registeredAt: entry.registeredAt
     }
   }
 

@@ -58,6 +58,7 @@ describe('AgentCreateDialog', () => {
 
     await waitFor(() =>
       expect(mocks.createAgent).toHaveBeenCalledWith({
+        analytics: { entry: 'dialog' },
         type: 'claude-code',
         name: 'New',
         model: 'p::m',

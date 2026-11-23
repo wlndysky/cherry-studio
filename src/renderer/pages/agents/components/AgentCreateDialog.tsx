@@ -22,7 +22,7 @@ export function AgentCreateDialog({ open, onOpenChange, onCreated }: AgentCreate
   const handleSubmitCreate = useCallback(
     async (values: ResourceCreateWizardValues) => {
       try {
-        const created = await createAgent(buildCreateAgentCommand(values))
+        const created = await createAgent(buildCreateAgentCommand(values, { entry: 'dialog' }))
         onOpenChange(false)
         await onCreated(created.id)
       } catch (error) {

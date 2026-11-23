@@ -4,6 +4,7 @@ import { agentSessionService } from '@data/services/AgentSessionService'
 import type { NotifyChannel } from '@main/ai/runtime/agentMcpServers'
 import { ErrorCode, isDataApiError } from '@shared/data/api/errors'
 import type { CherryMessagePart } from '@shared/data/types/message'
+import type { AgentTurnSource } from '@shared/ipc/schemas/analytics'
 
 import { buildAgentSessionTopicId } from '../../agentSession/topic'
 import { agentChatContextProvider } from '../context/AgentChatContextProvider'
@@ -25,6 +26,8 @@ export async function startAgentSessionRun(input: {
   userParts: CherryMessagePart[]
   listeners: StreamListener[]
   headless?: boolean
+  /** Analytics only: who started the turn. */
+  turnSource?: AgentTurnSource
   /** Recipients authorized only for this run; [] deliberately disables notify. */
   trustedNotifyChannels?: readonly NotifyChannel[]
   requireIdle?: { expectedAgentId: string }
@@ -84,7 +87,8 @@ export async function startAgentSessionRun(input: {
           trigger: 'submit-message',
           topicId,
           userMessageParts: input.userParts,
-          headless: input.headless === true
+          headless: input.headless === true,
+          ...(input.turnSource ? { turnSource: input.turnSource } : {})
         },
         { trustedNotifyChannels: input.trustedNotifyChannels },
         {

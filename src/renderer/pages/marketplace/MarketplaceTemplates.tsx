@@ -207,7 +207,9 @@ export function MarketplaceTemplates({
             }
           }}
           onSubmit={async (values) => {
-            await createAgent(buildCreateAgentCommand(values))
+            await createAgent(
+              buildCreateAgentCommand(values, { entry: 'marketplace', templateId: createDialog.value?.id })
+            )
             toast.success(t('common.add_success'))
             setCreating(null)
             trigger.current?.focus()

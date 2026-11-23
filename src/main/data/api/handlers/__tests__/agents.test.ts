@@ -13,7 +13,8 @@ const {
   listTasksMock,
   getTaskMock,
   listSkillsMock,
-  getSkillByIdMock
+  getSkillByIdMock,
+  trackProductEvent
 } = vi.hoisted(() => ({
   listAgentsMock: vi.fn(),
   getAgentMock: vi.fn(),
@@ -25,8 +26,14 @@ const {
   listTasksMock: vi.fn(),
   getTaskMock: vi.fn(),
   listSkillsMock: vi.fn(),
-  getSkillByIdMock: vi.fn()
+  getSkillByIdMock: vi.fn(),
+  trackProductEvent: vi.fn()
 }))
+
+vi.mock('@application', async () => {
+  const { mockApplicationFactory } = await import('@test-mocks/main/application')
+  return mockApplicationFactory({ AnalyticsService: { trackProductEvent } })
+})
 
 vi.mock('@data/services/AgentService', () => ({
   agentService: {
@@ -166,6 +173,43 @@ describe('agentHandlers', () => {
 
       expect(updateAgentMock).toHaveBeenCalledWith(AGENT_ID, { name: 'Updated' })
       expect(result).toMatchObject({ name: 'Updated' })
+    })
+
+    it('reports only the settings that changed, with values for enums and booleans only', async () => {
+      getAgentMock.mockReturnValueOnce({
+        ...mockAgent,
+        instructions: 'Keep it short',
+        configuration: { permission_mode: 'default', heartbeat_enabled: false, env_vars: { A: '1' } }
+      })
+      updateAgentMock.mockReturnValueOnce({
+        ...mockAgent,
+        name: 'Renamed secret project',
+        instructions: 'Keep it short',
+        configuration: { permission_mode: 'plan', heartbeat_enabled: true, env_vars: { TOKEN: 'secret' } }
+      })
+
+      await agentHandlers['/agents/:agentId'].PATCH({
+        params: { agentId: AGENT_ID },
+        body: {
+          name: 'Renamed secret project',
+          instructions: 'Keep it short',
+          configuration: { permission_mode: 'plan', heartbeat_enabled: true, env_vars: { TOKEN: 'secret' } },
+          skillUpdates: [{ skillId: SKILL_ID, isEnabled: false }]
+        }
+      })
+
+      const events = trackProductEvent.mock.calls.map(([event]) => event)
+      expect(events).toHaveLength(5)
+      expect(events).toEqual(
+        expect.arrayContaining([
+          { event: 'agent_setting_changed', key: 'name' },
+          { event: 'agent_setting_changed', key: 'configuration.permission_mode', value: 'plan' },
+          { event: 'agent_setting_changed', key: 'configuration.heartbeat_enabled', value: true },
+          { event: 'agent_setting_changed', key: 'configuration.env_vars' },
+          { event: 'feature_used', feature: 'skills', action: 'skill_disabled', origin: 'ui' }
+        ])
+      )
+      expect(JSON.stringify(events)).not.toMatch(/secret|Keep it short/)
     })
 
     it('throws notFound when agent does not exist on PATCH', async () => {

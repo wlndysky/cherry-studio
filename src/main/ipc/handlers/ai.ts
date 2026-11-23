@@ -19,7 +19,11 @@ import { findPersistedToolOutput } from '@main/ai/messages/persistedToolOutput'
 import { AgentSessionForkError } from '@main/ai/runtime/fork'
 import { AiStreamAdmissionError, type MainDispatchRequest } from '@main/ai/streamManager'
 import { openRequestPath } from '@main/services/file'
-import { trackAgentSessionCreated, trackMainProductEvent } from '@main/services/productAnalytics'
+import {
+  reportAgentSessionAction,
+  trackAgentSessionCreated,
+  trackMainProductEvent
+} from '@main/services/productAnalytics'
 import { PathStaleVersionError } from '@main/utils/file'
 import { isAgentSessionForkFailureReason } from '@shared/ai/agentSessionFork'
 import type { MessageProjectionUpdate } from '@shared/ai/messageProjection'
@@ -273,25 +277,33 @@ export const aiHandlers: IpcHandlersFor<typeof aiRequestSchemas> = {
     application.get('AgentSessionRuntimeService').releaseWarmLease(sessionId, senderWebContents(senderId))
   },
   'ai.agent.session.delete': ({ sessionIds, permanent }) =>
-    exposeAgentSessionArchiveError(() =>
-      permanent
-        ? application.get('AgentLifecycleService').purgeSessions(sessionIds)
-        : application.get('AgentLifecycleService').archiveSessions(sessionIds)
+    reportAgentSessionAction(permanent ? 'purge' : 'archive', sessionIds.length, () =>
+      exposeAgentSessionArchiveError(() =>
+        permanent
+          ? application.get('AgentLifecycleService').purgeSessions(sessionIds)
+          : application.get('AgentLifecycleService').archiveSessions(sessionIds)
+      )
     ),
-  'ai.agent.session.restore': ({ sessionId }) => restoreAgentSession(sessionId),
+  'ai.agent.session.restore': ({ sessionId }) =>
+    reportAgentSessionAction('restore', 1, () => restoreAgentSession(sessionId)),
   'ai.agent.session.delete_permanently': ({ sessionIds }) =>
-    exposeAgentSessionArchiveError(() =>
-      application.get('AgentLifecycleService').deleteActiveSessionsPermanently(sessionIds)
+    reportAgentSessionAction('purge', sessionIds.length, () =>
+      exposeAgentSessionArchiveError(() =>
+        application.get('AgentLifecycleService').deleteActiveSessionsPermanently(sessionIds)
+      )
     ),
   'ai.agent.session.reuse_or_create': async (input) => {
     const result = await application.get('AgentLifecycleService').reuseOrCreateSession(input)
     if (result.created) trackAgentSessionCreated(input.agentId)
+    else trackMainProductEvent({ event: 'agent_session_action', action: 'reuse', status: 'success', count: 1 })
     return result
   },
   'ai.agent.session.fork': async ({ sourceSessionId, messageId }) => {
     try {
       return {
-        sessionId: await application.get('AgentSessionRuntimeService').forkSession(sourceSessionId, messageId)
+        sessionId: await reportAgentSessionAction('fork', 1, () =>
+          application.get('AgentSessionRuntimeService').forkSession(sourceSessionId, messageId)
+        )
       }
     } catch (error) {
       logger.warn('Agent session fork failed', { sourceSessionId, messageId, error })
@@ -362,7 +374,11 @@ export const aiHandlers: IpcHandlersFor<typeof aiRequestSchemas> = {
       throw error
     }
   },
-  'ai.agent.heartbeat.run': ({ agentId }) => application.get('AgentJobsService').runHeartbeat(agentId),
+  'ai.agent.heartbeat.run': async ({ agentId }) => {
+    const result = await application.get('AgentJobsService').runHeartbeat(agentId)
+    trackMainProductEvent({ event: 'agent_context_event', action: 'heartbeat_run', trigger: 'manual', result })
+    return result
+  },
   'ai.agent.task.create': ({ agentId, ...form }) =>
     exposeAgentTaskError(() => {
       const task = application.get('AgentJobsService').createTask(agentId, form)
