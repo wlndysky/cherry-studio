@@ -590,6 +590,8 @@ export const DefaultRendererPersistCache: RendererPersistCacheSchema = {
 export type MainPersistCacheSchema = {
   // Local day (YYYY-MM-DD) of the last daily analytics snapshot; losing it only sends one extra snapshot.
   'analytics.snapshot.last_day': string | null
+  // Local day of the last app_active report; kept apart so the behavior snapshots cannot suppress it.
+  'analytics.active.last_day': string | null
   'skill.subscription.catalogs': Record<string, SkillSubscriptionSnapshot>
   // ZIP-derived contents only; installed state still comes from the skill library.
   'skill.marketplace.members': Record<string, MarketplaceSkillMember[]>
@@ -612,6 +614,7 @@ export type MainPersistCacheSchema = {
 
 export const DefaultMainPersistCache: MainPersistCacheSchema = {
   'analytics.snapshot.last_day': null,
+  'analytics.active.last_day': null,
   'skill.subscription.catalogs': {},
   'skill.marketplace.members': {},
   'browser.favicons': {},

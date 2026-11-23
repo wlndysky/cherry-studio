@@ -63,6 +63,7 @@ describe('Application shutdown', () => {
 
     exitSpy = vi.spyOn(process, 'exit').mockImplementation((() => undefined) as never)
     vi.spyOn(bootConfigService, 'flush').mockImplementation(() => {})
+    vi.spyOn(bootConfigService, 'set').mockImplementation(() => {})
     vi.spyOn(mockMainLoggerService, 'finish').mockImplementation(() => {})
     mockMainLoggerService.info.mockClear()
     mockMainLoggerService.warn.mockClear()
@@ -104,6 +105,14 @@ describe('Application shutdown', () => {
 
     await vi.runAllTimersAsync()
   }
+
+  it('records the run as ended cleanly before boot config is flushed', async () => {
+    await runWillQuit(Application.getInstance())
+
+    expect(bootConfigService.set).toHaveBeenCalledWith('temp.app.running', false)
+    const setOrder = vi.mocked(bootConfigService.set).mock.invocationCallOrder[0]
+    expect(setOrder).toBeLessThan(vi.mocked(bootConfigService.flush).mock.invocationCallOrder[0])
+  })
 
   it('should not force-exit when a single service times out, and still stop the rest', async () => {
     const stopped: string[] = []

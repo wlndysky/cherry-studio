@@ -3,6 +3,7 @@ import type { PostHog } from 'posthog-node'
 
 import { application } from '@application'
 import type { AnalyticsClient, TokenUsageData } from '@cherrystudio/analytics-client'
+import { isMigratedFromV1 } from '@data/migration/v1MigrationOrigin'
 import { messageService } from '@data/services/MessageService'
 import { loggerService } from '@logger'
 import { createLatestReconciler, type LatestReconciler } from '@main/core/concurrency/latestReconciler'
@@ -17,7 +18,9 @@ import { BEHAVIOR_ANALYTICS_EVENTS, type ProductAnalyticsEvent } from '@shared/i
 import type { AppEdition } from '@shared/types/appEdition'
 import { APP_NAME } from '@shared/utils/constants'
 
+import { restoreKeptClientId, takePendingReports } from './analyticsPendingReports'
 import { PREFERENCE_ANALYTICS_CATALOG } from './analyticsPreferenceCatalog.gen'
+import { versionService } from './VersionService'
 
 const logger = loggerService.withContext('AnalyticsService')
 
@@ -85,6 +88,22 @@ function settingsSnapshot(read: (key: UnifiedPreferenceKeyType) => unknown): Set
     }
   }
   return event
+}
+
+function appOpenedEvent(): Extract<ProductAnalyticsEvent, { event: 'app_opened' }> {
+  let migratedFromV1 = false
+  try {
+    migratedFromV1 = isMigratedFromV1()
+  } catch (error) {
+    logger.warn('v1 migration origin unavailable', error as Error)
+  }
+  return {
+    event: 'app_opened',
+    onboardingStatus: application.get('PreferenceService').get('app.onboarding.provider_setup.status'),
+    launch: versionService.getLaunchKind(),
+    migratedFromV1,
+    lastExit: application.lastExit
+  }
 }
 
 function localDay(date: Date): string {
@@ -162,6 +181,11 @@ export class AnalyticsService extends BaseService implements Activatable {
   }
 
   protected async onInit() {
+    try {
+      await restoreKeptClientId()
+    } catch (error) {
+      logger.warn('Client id kept across restore not applied', error as Error)
+    }
     // The reconciler is the sole driver of activate/deactivate (latest-wins): a re-enable that lands
     // while the async onDeactivate (`await client.destroy()`) is in flight must not be dropped by the
     // shared `_activating` guard. The reconciler holds no OS resources and is a construct-once field
@@ -182,7 +206,10 @@ export class AnalyticsService extends BaseService implements Activatable {
       for (const { timer } of this.pendingSettingChanges.values()) clearTimeout(timer)
       this.pendingSettingChanges.clear()
     })
-    this.registerInterval(() => this.reportDailySnapshots(), SNAPSHOT_CHECK_INTERVAL_MS)
+    this.registerInterval(() => {
+      this.reportDailyActive()
+      this.reportDailySnapshots()
+    }, SNAPSHOT_CHECK_INTERVAL_MS)
   }
 
   protected async onReady() {
@@ -246,15 +273,14 @@ export class AnalyticsService extends BaseService implements Activatable {
         version: app.getVersion(),
         os: process.platform
       })
-      this.captureProductEvent({
-        event: 'app_opened',
-        onboardingStatus: application.get('PreferenceService').get('app.onboarding.provider_setup.status')
-      })
+      this.captureProductEvent(appOpenedEvent())
       this.hasTrackedAppLaunch = true
     }
 
     this.productEventsReady = true
     for (const event of this.pendingProductEvents.splice(0)) this.captureProductEvent(event)
+    for (const event of takePendingReports()) this.captureProductEvent(event)
+    this.reportDailyActive()
     this.reportDailySnapshots()
 
     logger.info('Analytics service activated')
@@ -317,6 +343,16 @@ export class AnalyticsService extends BaseService implements Activatable {
     }
     if (this.pendingProductEvents.length >= MAX_PENDING_PRODUCT_EVENTS) this.pendingProductEvents.shift()
     this.pendingProductEvents.push(event)
+  }
+
+  // Consent alone gates daily activity; it keeps its own day key so the behavior snapshots cannot suppress it.
+  private reportDailyActive(): void {
+    if (!this.productEventsReady) return
+    const cache = application.get('CacheService')
+    const today = localDay(new Date())
+    if (cache.getPersist('analytics.active.last_day') === today) return
+    cache.setPersist('analytics.active.last_day', today)
+    this.trackProductEvent({ event: 'app_active' })
   }
 
   // Settings and branch counts as they stand, once per local day while product events are flowing.

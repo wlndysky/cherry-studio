@@ -38,6 +38,7 @@ import { MIN_WINDOW_HEIGHT, MIN_WINDOW_WIDTH } from '@shared/utils/window'
 import iconPath from '../../../build/icon.png?asset'
 import { isSafeExternalUrl } from '../utils/externalUrlSafety'
 import { contextMenu } from './ContextMenu'
+import { trackMainProductEvent } from './productAnalytics'
 
 const logger = loggerService.withContext('MainWindowService')
 
@@ -69,6 +70,7 @@ export class MainWindowService extends BaseService {
    */
   private suppressInitialLaunchShow = false
   private architectureWarningShown = false
+  private startupReported = false
 
   constructor() {
     super()
@@ -564,6 +566,15 @@ export class MainWindowService extends BaseService {
       const suppressShow = this.suppressInitialLaunchShow
       this.suppressInitialLaunchShow = false
       if (!suppressShow) mainWindow.show()
+      if (!this.startupReported) {
+        this.startupReported = true
+        // Main-process performance.now() counts from process start.
+        trackMainProductEvent({
+          event: 'app_started',
+          startupMs: Math.round(performance.now()),
+          launchToTray: suppressShow
+        })
+      }
     })
 
     // Workaround for electron#10572: zoom factor resets to the cached value when

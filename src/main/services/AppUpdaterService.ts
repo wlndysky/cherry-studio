@@ -15,6 +15,7 @@ import { logFailure } from '@main/core/logger/logFailure'
 import { isWin } from '@main/core/platform'
 import { WindowType } from '@main/core/window/types'
 import { getAppLanguage, t } from '@main/i18n'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 import { regionService } from '@main/services/RegionService'
 import { getAppEdition } from '@main/utils/appEdition'
 import { generateUserAgent, getClientId } from '@main/utils/systemInfo'
@@ -144,6 +145,8 @@ export class AppUpdaterService extends BaseService {
   private readonly pendingReleaseNotifications = new Set<string>()
   private cancellationToken: CancellationToken = new CancellationToken()
   private updateCheckResult: UpdateCheckResult | null = null
+  /** An available update is downloading; the updater's shared 'error' event then means a failed download. */
+  private downloadInProgress = false
   // Consecutive scheduled-check failures, drives backoff; reset on success.
   private updateCheckFailures = 0
 
@@ -239,6 +242,10 @@ export class AppUpdaterService extends BaseService {
   private registerAutoUpdaterListeners(): void {
     const onError = (error: Error) => {
       logFailure(logger, 'update error', error, 'update.run', classifyUpdateFailure(error))
+      if (this.downloadInProgress) {
+        this.downloadInProgress = false
+        trackMainProductEvent({ event: 'update_downloaded', status: 'error' })
+      }
       application.get('IpcApiService').broadcastToType(WindowType.Main, 'app.updater.error', error)
     }
     autoUpdater.on('error', onError)
@@ -246,6 +253,7 @@ export class AppUpdaterService extends BaseService {
 
     const onUpdateAvailable = (releaseInfo: UpdateInfo) => {
       logger.info('update available', releaseInfo)
+      this.downloadInProgress = true
       const processedReleaseInfo = this.processReleaseInfo(releaseInfo)
       void this.publishReleaseNotification(processedReleaseInfo)
       application.get('IpcApiService').broadcastToType(WindowType.Main, 'app.updater.available', processedReleaseInfo)
@@ -273,6 +281,10 @@ export class AppUpdaterService extends BaseService {
     this.registerDisposable(() => autoUpdater.removeListener('download-progress', onDownloadProgress))
 
     const onUpdateDownloaded = (releaseInfo: UpdateInfo) => {
+      if (this.downloadInProgress) {
+        this.downloadInProgress = false
+        trackMainProductEvent({ event: 'update_downloaded', status: 'success' })
+      }
       const processedReleaseInfo = this.processReleaseInfo(releaseInfo)
       application.get('IpcApiService').broadcastToType(WindowType.Main, 'app.updater.downloaded', processedReleaseInfo)
       logger.info('update downloaded', processedReleaseInfo)
@@ -449,7 +461,7 @@ export class AppUpdaterService extends BaseService {
    * event-driven contract: errors reach the renderer via the `UpdateError`
    * broadcast (see `registerAutoUpdaterListeners`), not the return value.
    */
-  private async performUpdateCheck() {
+  private async performUpdateCheck(source: 'manual' | 'auto') {
     void application.get('AnalyticsService').trackAppUpdate()
 
     if (this.isPortable()) {
@@ -459,9 +471,18 @@ export class AppUpdaterService extends BaseService {
       }
     }
 
-    await this.configureUpdaterForCheck()
-
-    this.updateCheckResult = await autoUpdater.checkForUpdates()
+    try {
+      await this.configureUpdaterForCheck()
+      this.updateCheckResult = await autoUpdater.checkForUpdates()
+    } catch (error) {
+      trackMainProductEvent({ event: 'update_checked', source, result: 'error' })
+      throw error
+    }
+    trackMainProductEvent({
+      event: 'update_checked',
+      source,
+      result: this.updateCheckResult?.isUpdateAvailable ? 'available' : 'not_available'
+    })
     logger.info(
       `update check result: ${this.updateCheckResult?.isUpdateAvailable}, channel: ${autoUpdater.channel}, currentVersion: ${autoUpdater.currentVersion}`
     )
@@ -481,7 +502,7 @@ export class AppUpdaterService extends BaseService {
 
   public async checkForUpdates() {
     try {
-      return await this.performUpdateCheck()
+      return await this.performUpdateCheck('manual')
     } catch (error) {
       logFailure(logger, 'Failed to check for update:', error, 'update.check', classifyUpdateFailure(error))
       return {
@@ -514,7 +535,7 @@ export class AppUpdaterService extends BaseService {
       // backoff — the manual download trigger is fire-and-forget and surfaces
       // its own errors via the `UpdateError` event.
       if (application.get('PreferenceService').get('app.dist.auto_update.enabled')) {
-        await this.performUpdateCheck()
+        await this.performUpdateCheck('auto')
       }
       this.updateCheckFailures = 0
       this.scheduleNextUpdateCheck(this.nextUpdateCheckDelayMs())
@@ -531,6 +552,7 @@ export class AppUpdaterService extends BaseService {
   }
 
   public quitAndInstall() {
+    trackMainProductEvent({ event: 'update_install_started' })
     application.markQuitting()
     setImmediate(() => autoUpdater.quitAndInstall(true, true))
   }

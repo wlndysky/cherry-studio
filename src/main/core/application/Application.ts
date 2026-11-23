@@ -45,6 +45,7 @@ export class Application {
   private quitGuardsPassed = false
   private readonly quitGuards = new Set<QuitGuard>()
   private quitPreventionHolds = new Map<string, string>()
+  private _lastExit: 'clean' | 'unclean' | 'unknown' = 'unknown'
 
   /**
    * Frozen path registry. `null` until `bootstrap()` is invoked, after
@@ -198,6 +199,8 @@ export class Application {
       // If we reach here, user chose "Continue with Defaults"
     }
 
+    this.markRunning()
+
     const bootstrapStart = performance.now()
 
     try {
@@ -264,6 +267,7 @@ export class Application {
 
     // Flush boot config first (save pending debounced writes)
     try {
+      bootConfigService.set('temp.app.running', false)
       bootConfigService.flush()
     } catch (e) {
       logger.warn('bootConfig flush error:', e as Error)
@@ -411,6 +415,7 @@ export class Application {
           buttons: ['OK']
         })
       }
+      this.markStoppedForRelaunch()
       app.exit(0)
       return
     }
@@ -430,7 +435,26 @@ export class Application {
     }
 
     app.relaunch(options)
+    this.markStoppedForRelaunch()
     app.exit(0)
+  }
+
+  /** How the previous run ended, read once at bootstrap: graceful quit or relaunch, or not. */
+  public get lastExit(): 'clean' | 'unclean' | 'unknown' {
+    return this._lastExit
+  }
+
+  private markRunning(): void {
+    const previous = bootConfigService.get('temp.app.running')
+    this._lastExit = previous === null ? 'unknown' : previous ? 'unclean' : 'clean'
+    bootConfigService.set('temp.app.running', true)
+    bootConfigService.flush()
+  }
+
+  // A relaunch skips shutdown(); pending boot config writes would otherwise be lost too.
+  private markStoppedForRelaunch(): void {
+    bootConfigService.set('temp.app.running', false)
+    bootConfigService.flush()
   }
 
   /**

@@ -109,6 +109,74 @@ const MANUAL_BOOT_CONFIG_ITEMS = [
       '',
       'Consumer: src/main/services/userDataRelocation'
     ]
+  },
+  {
+    source: 'preboot',
+    sourceCategory: 'transient',
+    originalKey: 'appRunning',
+    targetKey: 'temp.app.running',
+    zodType: 'z.boolean().nullable()',
+    defaultValue: null,
+    jsdoc: [
+      'Whether a lifecycle-managed run of the app is in progress.',
+      '',
+      'Set to true when bootstrap starts and back to false on a graceful',
+      'shutdown or relaunch, so a true value at the next bootstrap means the',
+      'previous run ended without either (crash, kill, power loss). null means',
+      'unknown: first launch, or the previous run predates this marker.',
+      '',
+      'Consumer: src/main/core/application/Application.ts'
+    ]
+  },
+  {
+    source: 'preboot',
+    sourceCategory: 'transient',
+    originalKey: 'analyticsPendingReports',
+    targetKey: 'temp.analytics.pending_reports',
+    zodType:
+      'z.array(\n' +
+      '    z.union([\n' +
+      '      z.object({\n' +
+      "        event: z.literal('restore_run'),\n" +
+      "        target: z.enum(['file', 'local_dir', 'webdav', 'nutstore', 's3']).optional(),\n" +
+      "        status: z.enum(['staged', 'completed', 'failed'])\n" +
+      '      }),\n' +
+      '      z.object({\n' +
+      "        event: z.literal('data_relocation_run'),\n" +
+      '        copy: z.boolean(),\n' +
+      "        status: z.enum(['completed', 'failed', 'abandoned'])\n" +
+      '      })\n' +
+      '    ])\n' +
+      '  )',
+    defaultValue: 'VALUE: []',
+    jsdoc: [
+      'Product analytics results of work that ends in a relaunch (backup',
+      'restore, userData relocation), held until the next launch reports them.',
+      '',
+      'A relaunch exits without flushing analytics, and a restore replaces the',
+      'database and cache, so these results live in BootConfig. Entries carry',
+      "only static values; a 'staged' restore waits for the restore gate to",
+      'settle it on the next launch.',
+      '',
+      'Consumer: src/main/services/analyticsPendingReports.ts'
+    ]
+  },
+  {
+    source: 'preboot',
+    sourceCategory: 'transient',
+    originalKey: 'analyticsRestoreClientId',
+    targetKey: 'temp.analytics.restore_client_id',
+    zodType: 'z.string().nullable()',
+    defaultValue: null,
+    jsdoc: [
+      "This device's analytics client id, saved before a backup restore.",
+      '',
+      'A restore replaces the database that holds `app.user.id`, so a backup',
+      "from another device would otherwise hand this device that device's id.",
+      'The first read after the restart writes it back and clears this key.',
+      '',
+      'Consumer: src/main/utils/systemInfo.ts'
+    ]
   }
 ]
 
