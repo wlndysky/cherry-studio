@@ -1,5 +1,6 @@
 import { application } from '@application'
 import { agentService } from '@data/services/AgentService'
+import { classifyNetworkError } from '@main/utils/networkError'
 import { isProtectedBuiltinAgentRole } from '@shared/ai/builtinAgent'
 import {
   AGENT_MUTABLE_FIELDS,
@@ -7,7 +8,7 @@ import {
   type AgentEntity,
   type UpdateAgentDto
 } from '@shared/data/api/schemas/agents'
-import type { MainAnalyticsEvent } from '@shared/ipc/schemas/analytics'
+import type { MainAnalyticsEvent, TransferFailureReason } from '@shared/ipc/schemas/analytics'
 import type { DoctorFixRequest, DoctorFixResult, DoctorRunResult, DoctorRunTier } from '@shared/types/doctor'
 
 export { analyticsModelSource } from '@shared/utils/analyticsModelSource'
@@ -19,6 +20,28 @@ export function trackMainProductEvent(event: MainAnalyticsEvent): void {
   } catch {
     // Analytics is optional infrastructure for every caller.
   }
+}
+
+/** Names a failed upload or download by kind only, since its message carries the URL. */
+export function transferFailureReason(error: unknown): TransferFailureReason {
+  const failure = error as {
+    code?: unknown
+    status?: unknown
+    statusCode?: unknown
+    $metadata?: { httpStatusCode?: unknown }
+  } | null
+  if (failure?.code === 'ENOSPC') return 'disk_full'
+  // WebDAV sets `status`, electron-updater `statusCode`, and the S3 SDK `$metadata.httpStatusCode`.
+  const status = [failure?.status, failure?.statusCode, failure?.$metadata?.httpStatusCode].find(
+    (value): value is number => typeof value === 'number'
+  )
+  if (status === 401 || status === 403) return 'auth'
+  const { kind } = classifyNetworkError(error, status)
+  // Other 4xx answers (missing path or bucket, conflict) point at the user's settings.
+  if (kind === 'http_client') return 'config'
+  if (kind === 'http_server') return 'server'
+  if (kind === 'timeout') return 'timeout'
+  return kind === 'unknown' ? 'other' : 'network'
 }
 
 export function analyticsAgentKind(agentId: string): 'builtin' | 'custom' {

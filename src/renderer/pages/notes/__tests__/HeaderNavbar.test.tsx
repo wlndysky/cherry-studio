@@ -35,6 +35,7 @@ vi.mock('@renderer/services/toast', () => ({ toast: { error: vi.fn(), success: v
 vi.mock('../NotesSettings', () => ({ default: () => null }))
 
 import i18n from '@renderer/i18n/resolver'
+import { ipcApi } from '@renderer/ipc'
 import { toast } from '@renderer/services/toast'
 import type { NoteRenameResult } from '@renderer/types/note'
 
@@ -90,6 +91,40 @@ describe('HeaderNavbar accessibility', () => {
     rerender(<HeaderNavbar notesTree={[note]} onToggleStar={vi.fn()} />)
 
     expect(screen.getByRole('button', { name: 'Unfavorite' })).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  it('reports a Word export from the note header by format and outcome only', async () => {
+    const note: NotesTreeNode = {
+      id: 'note-1',
+      name: 'private plan.md',
+      type: 'file',
+      treePath: '/private plan.md',
+      externalPath: '/notes/private plan.md',
+      createdAt: '',
+      updatedAt: ''
+    }
+    notesQueryMock.activeNode = note
+    let wordExports = 0
+    vi.mocked(ipcApi.request).mockImplementation(async (route: string) => {
+      if (route === 'export.word.from_markdown' && ++wordExports === 2) throw new Error('disk full')
+      return undefined
+    })
+    const user = userEvent.setup()
+    render(<HeaderNavbar notesTree={[note]} getCurrentNoteContent={() => 'secret body'} />)
+
+    for (let attempt = 0; attempt < 2; attempt++) {
+      await user.click(screen.getByRole('button', { name: 'More' }))
+      await user.click(await screen.findByRole('button', { name: 'Export to Word' }))
+    }
+
+    const reported = vi
+      .mocked(ipcApi.request)
+      .mock.calls.filter(([route]) => route === 'analytics.track')
+      .map(([, event]) => event)
+    expect(reported).toEqual([
+      { event: 'feature_used', feature: 'notes', action: 'exported', target: 'docx', status: 'success' },
+      { event: 'feature_used', feature: 'notes', action: 'exported', target: 'docx', status: 'error' }
+    ])
   })
 
   it('restores keyboard focus to the named more button when its menu closes', async () => {

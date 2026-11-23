@@ -24,8 +24,25 @@ const RECORDING_MIME_TYPE = 'audio/webm;codecs=opus'
 const MAX_RECORDING_DURATION_MS = 300_000
 const ELAPSED_UPDATE_INTERVAL_MS = 1_000
 
-const reportDictation = (status: 'success' | 'error') =>
-  trackProductEvent({ event: 'feature_used', feature: 'voice', action: 'dictation_used', status })
+// Only the static prefix of a target id is reported; the topic, session, or note id after it never leaves.
+const DICTATION_SURFACES: readonly [prefix: string, surface: string][] = [
+  ['composer:chat:', 'chat'],
+  ['composer:session:', 'agent'],
+  ['quick-assistant-input:', 'quick_assistant'],
+  ['translate-page-source', 'translate'],
+  ['notes:', 'notes']
+]
+
+const reportDictation = (status: 'success' | 'error', target: CapturedVoiceTarget | null | undefined) => {
+  const surface = target && (DICTATION_SURFACES.find(([prefix]) => target.targetId.startsWith(prefix))?.[1] ?? 'other')
+  trackProductEvent({
+    event: 'feature_used',
+    feature: 'voice',
+    action: 'dictation_used',
+    status,
+    ...(surface && { target: surface })
+  })
+}
 
 export type DictationPhase =
   | 'idle'
@@ -595,7 +612,7 @@ export class DictationService {
   }
 
   private async complete(active: ActiveDictation, text: string): Promise<void> {
-    reportDictation('success')
+    reportDictation('success', active.target)
     let inserted: VoiceTargetInsertResult = 'unavailable'
     try {
       if (active.target) inserted = this.targets.insert(active.target, text)
@@ -842,7 +859,7 @@ export class DictationService {
     error?: DictationErrorCategory,
     retryAvailable?: true
   ): void {
-    if (phase === 'failed' && this.snapshot.phase !== 'failed') reportDictation('error')
+    if (phase === 'failed' && this.snapshot.phase !== 'failed') reportDictation('error', this.active?.target)
     this.snapshot = Object.freeze({
       phase,
       elapsedMs,

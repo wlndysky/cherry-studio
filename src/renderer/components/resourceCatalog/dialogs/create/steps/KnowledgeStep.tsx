@@ -3,6 +3,7 @@ import type { UseFormReturn } from 'react-hook-form'
 
 import { KnowledgeBaseField } from '@renderer/components/resourceCatalog/dialogs/components/EditDialogShared'
 import { ipcApi } from '@renderer/ipc'
+import { trackProductEvent } from '@renderer/services/productAnalytics'
 import { getDefaultRouteTitle } from '@renderer/utils/routeTitle'
 import { uuid } from '@renderer/utils/uuid'
 
@@ -21,12 +22,14 @@ type KnowledgeStepProps = {
 export function KnowledgeStep({ form, isSubmitting = false, portalContainer }: KnowledgeStepProps) {
   const openKnowledgePage = useCallback(() => {
     if (isSubmitting) return
-    void ipcApi.request('tab.detach', {
-      id: uuid(),
-      url: '/app/knowledge',
-      title: getDefaultRouteTitle('/app/knowledge'),
-      type: 'route'
-    })
+    void ipcApi
+      .request('tab.detach', {
+        id: uuid(),
+        url: '/app/knowledge',
+        title: getDefaultRouteTitle('/app/knowledge'),
+        type: 'route'
+      })
+      .then(() => trackProductEvent({ event: 'window_opened', kind: 'knowledge' }))
   }, [isSubmitting])
 
   return (
