@@ -10,12 +10,14 @@ import { agentGlobalSkillService } from '@data/services/AgentGlobalSkillService'
 import { loggerService } from '@logger'
 import { isWin } from '@main/core/platform'
 import { runPathMutationExclusive } from '@main/services/file'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 import { isPathInside } from '@main/utils/file'
 import { directoryExists } from '@main/utils/legacyFile'
 import { findAllSkillDirectories, findSkillMdPath, parseSkillMetadata } from '@main/utils/markdownParser'
 import { getShellEnv } from '@main/utils/shellEnv'
 import type { InstalledSkill, ListSkillsQuery } from '@shared/data/api/schemas/skills'
 import { skillErrorCodes } from '@shared/ipc/errors/skill'
+import { presetIdSchema } from '@shared/ipc/schemas/analytics'
 import type { SkillCatalogEntry } from '@shared/types/skill'
 import type {
   SkillImportSystemOptions,
@@ -55,6 +57,21 @@ const logger = loggerService.withContext('SkillService')
 
 const SKILLS_PLUGIN_MANIFEST = `${JSON.stringify({ name: 'cherry-studio-skills' }, null, 2)}\n`
 const BUILTIN_VERSION_FILE = '.version'
+const CHERRY_MARKETPLACE_NAMESPACE = marketplaceSkillNamespace('')
+
+/** Only Cherry's own marketplace catalog ids are reported; other sources name user or third-party skills. */
+function reportSkillInstalled(status: 'success' | 'error', namespace: string | null | undefined): void {
+  const target = namespace?.startsWith(CHERRY_MARKETPLACE_NAMESPACE)
+    ? namespace.slice(CHERRY_MARKETPLACE_NAMESPACE.length)
+    : undefined
+  trackMainProductEvent({
+    event: 'feature_used',
+    feature: 'skills',
+    action: 'skill_installed',
+    status,
+    ...(target && presetIdSchema.safeParse(target).success && { target })
+  })
+}
 
 type SkillRemoteUpdateErrorCode = (typeof skillErrorCodes)[keyof typeof skillErrorCodes]
 
@@ -615,6 +632,20 @@ export class SkillService {
     sourceUrl: string | null,
     provenance: { namespace?: string | null } = {}
   ): Promise<InstalledSkill> {
+    try {
+      return await this.addSkillDirToLibrary(skillDir, source, sourceUrl, provenance)
+    } catch (error) {
+      reportSkillInstalled('error', provenance.namespace)
+      throw error
+    }
+  }
+
+  private async addSkillDirToLibrary(
+    skillDir: string,
+    source: string,
+    sourceUrl: string | null,
+    provenance: { namespace?: string | null }
+  ): Promise<InstalledSkill> {
     const metadata = await parseSkillMetadata(skillDir, path.basename(skillDir), 'skills')
 
     const skillsRoot = path.resolve(application.getPath('feature.agents.skills'))
@@ -719,6 +750,9 @@ export class SkillService {
     await this.linkMirror(destFolderName, { throwOnError: true })
     if (isBuiltin) {
       this.enableForAllAgents(inserted.id)
+    } else {
+      // Only first installs report success; any failed attempt reports an error.
+      reportSkillInstalled('success', provenance.namespace)
     }
 
     logger.info('Skill installed', { id: inserted.id, name: metadata.name, folderName: destFolderName, source })

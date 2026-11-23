@@ -12,6 +12,7 @@ import { isDev, isMac, isWin } from '@main/core/platform'
 import { WindowType } from '@main/core/window/types'
 import { t } from '@main/i18n'
 import { MediaKind } from '@main/services/mediaProtocol'
+import { trackMainProductEvent } from '@main/services/productAnalytics'
 import { cropPng } from '@main/utils/image'
 import {
   getScreenCapturePermissionStatus,
@@ -122,6 +123,8 @@ export class ScreenshotOverlayService extends BaseService {
 
   /** Monotonic session id; a callback carrying an older one must not act. */
   private sessionGeneration = 0
+  /** In-app controls pass their window to {@link startCapture}; the global shortcut passes none. */
+  private sessionTrigger: 'page' | 'shortcut' = 'shortcut'
   private savingGeneration: number | null = null
   private hiddenSourceWindow: BrowserWindow | null = null
   private resultConsumer: {
@@ -133,10 +136,16 @@ export class ScreenshotOverlayService extends BaseService {
     const consumer = this.resultConsumer
     const generation = this.sessionGeneration
     if (!consumer) throw new Error('No result consumer is available')
-    if (nativeImage.createFromBuffer(Buffer.from(result.pngBytes)).isEmpty()) {
-      throw new Error('The screenshot could not be decoded')
+    try {
+      if (nativeImage.createFromBuffer(Buffer.from(result.pngBytes)).isEmpty()) {
+        throw new Error('The screenshot could not be decoded')
+      }
+      await consumer.submit(result)
+    } catch (error) {
+      this.reportCaptured('error')
+      throw error
     }
-    await consumer.submit(result)
+    this.reportCaptured('success')
     if (generation === this.sessionGeneration) this.dismiss()
   }
 
@@ -256,6 +265,7 @@ export class ScreenshotOverlayService extends BaseService {
       // Advance only once a session is definitely starting: bumping it above the guards
       // would let a blocked second attempt freeze the FIRST session's overlays at opacity 0.
       const generation = ++this.sessionGeneration
+      this.sessionTrigger = sourceWindowId ? 'page' : 'shortcut'
       const manager = application.get('WindowManager')
       this.resultConsumer = consumer ?? null
 
@@ -410,6 +420,7 @@ export class ScreenshotOverlayService extends BaseService {
           void this.showPermissionDialog()
         } else {
           logger.error('Failed to start the screenshot session', error as Error)
+          this.reportCaptured('error')
           // The user pressed a shortcut and nothing happened; a log they never read
           // leaves "unsupported here" (Wayland, absent native binary) looking like a
           // broken app. The reason is included because it is the only clue they get.
@@ -617,8 +628,8 @@ export class ScreenshotOverlayService extends BaseService {
     }
   }
 
-  /** Copy the overlay's result to the clipboard without ending the session. */
-  public async copy(result: ScreenshotResultData): Promise<void> {
+  /** Copy the overlay's result to the clipboard without ending the session; resolves whether it took. */
+  public async copy(result: ScreenshotResultData): Promise<boolean> {
     try {
       const bytes = Buffer.from(result.pngBytes)
       // createFromBuffer never throws — undecodable input yields an EMPTY image, and
@@ -626,15 +637,17 @@ export class ScreenshotOverlayService extends BaseService {
       if (nativeImage.createFromBuffer(bytes).isEmpty()) throw new Error('the result bytes could not be decoded')
       await clipboard.write([new ClipboardItem({ 'image/png': new Blob([bytes]) })])
       logger.info('Screenshot copied to the clipboard')
+      return true
     } catch (error) {
       logger.error('Failed to copy the screenshot to the clipboard', error as Error)
+      return false
     }
   }
 
   /** Copy the overlay's result to the clipboard and end the session. */
   public async commit(result: ScreenshotResultData): Promise<void> {
     const generation = this.sessionGeneration
-    await this.copy(result)
+    this.reportCaptured((await this.copy(result)) ? 'success' : 'error')
 
     // Outside the try: the overlays come down whether or not the clipboard took it, but
     // only for this session — the clipboard write yields, so a newer one may own them now.
@@ -693,9 +706,11 @@ export class ScreenshotOverlayService extends BaseService {
         }
         writeFileSync(dialogResult.filePath, result.pngBytes)
         logger.info('Screenshot saved to file')
+        this.reportCaptured('success')
       } catch (error) {
         // Logged, not rethrown: a failed write must not skip the teardown below.
         logger.error('Failed to save the screenshot', error as Error)
+        this.reportCaptured('error')
       }
 
       this.dismiss()
@@ -712,6 +727,17 @@ export class ScreenshotOverlayService extends BaseService {
       // not reveal a newer session's overlays over its save panel.
       if (isMac && generation === this.sessionGeneration) this.showAllOverlays()
     }
+  }
+
+  /** One capture outcome: a copied, saved, or delivered result, or a session that failed to start. */
+  private reportCaptured(status: 'success' | 'error'): void {
+    trackMainProductEvent({
+      event: 'feature_used',
+      feature: 'screenshot',
+      action: 'captured',
+      status,
+      trigger: this.sessionTrigger
+    })
   }
 
   /** Close every overlay and release the session's resources. */

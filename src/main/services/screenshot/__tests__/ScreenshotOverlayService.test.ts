@@ -94,13 +94,15 @@ vi.mock('node:fs', async (importOriginal) => {
 
 // ─── Lifecycle base ───────────────────────────────────────────────────────────
 
-vi.mock('@main/core/lifecycle', () => {
+vi.mock('@main/core/lifecycle', async (importOriginal) => {
   class MockBaseService {
     protected registerDisposable<T>(disposable: T): T {
       return disposable
     }
   }
   return {
+    // Real Emitter etc. for modules reached through the analytics helper.
+    ...(await importOriginal<object>()),
     BaseService: MockBaseService,
     Injectable: () => (target: unknown) => target,
     ServicePhase: () => (target: unknown) => target,
@@ -186,6 +188,7 @@ const container = vi.hoisted(() => {
   }
 
   const ipcApiService = { send: vi.fn(), broadcast: vi.fn(), broadcastToType: vi.fn() }
+  const analyticsService = { trackProductEvent: vi.fn() }
 
   const ocrInferenceService = {
     recognize: vi.fn<(source: { imageBytes: Uint8Array }) => Promise<{ text: string; lines: unknown[] }>>()
@@ -207,8 +210,10 @@ const container = vi.hoisted(() => {
       WindowManager: windowManager,
       IpcApiService: ipcApiService,
       OcrInferenceService: ocrInferenceService,
-      LocalModelService: localModel
+      LocalModelService: localModel,
+      AnalyticsService: analyticsService
     },
+    analyticsService,
     preferenceService,
     mediaProtocolService,
     windowManager,
@@ -1294,6 +1299,62 @@ describe('ScreenshotOverlayService', () => {
       expect(Object.keys(items[0].data)).toEqual(['image/png'])
       expect(new Uint8Array(await items[0].data['image/png'].arrayBuffer())).toEqual(PNG_BYTES)
       expect(service.isSessionOverlay('overlay-0-0')).toBe(false)
+    })
+
+    it('reports each captured result as a success, and nothing for a cancelled save', async () => {
+      const captured = {
+        event: 'feature_used',
+        feature: 'screenshot',
+        action: 'captured',
+        status: 'success',
+        trigger: 'shortcut'
+      }
+      singleDisplaySetup()
+      await service.startCapture()
+      await service.commit({ pngBytes: PNG_BYTES })
+      expect(container.analyticsService.trackProductEvent.mock.calls).toEqual([[captured]])
+
+      container.analyticsService.trackProductEvent.mockClear()
+      await service.startCapture()
+      electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: true, filePath: undefined })
+      await service.save({ pngBytes: PNG_BYTES })
+      expect(container.analyticsService.trackProductEvent).not.toHaveBeenCalled()
+
+      electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: '/tmp/shot.png' })
+      await service.save({ pngBytes: PNG_BYTES })
+      expect(container.analyticsService.trackProductEvent.mock.calls).toEqual([[captured]])
+    })
+
+    it('reports a capture started from an in-app control as opened from the page', async () => {
+      singleDisplaySetup()
+      container.windows.set('chat', createFakeWindow())
+      await service.startCapture('chat')
+      await service.commit({ pngBytes: PNG_BYTES })
+
+      expect(container.analyticsService.trackProductEvent.mock.calls[0][0]).toMatchObject({ trigger: 'page' })
+    })
+
+    it('reports a failed start, copy, save, or delivery as an error', async () => {
+      const statuses = () => container.analyticsService.trackProductEvent.mock.calls.map(([event]) => event.status)
+      singleDisplaySetup()
+      container.windowManager.getWindow.mockImplementationOnce(() => undefined)
+      await service.startCapture()
+
+      await service.startCapture()
+      electron.clipboard.write.mockRejectedValueOnce(new Error('clipboard busy'))
+      await service.commit({ pngBytes: PNG_BYTES })
+
+      await service.startCapture()
+      electron.dialog.showSaveDialog.mockResolvedValueOnce({ canceled: false, filePath: '/tmp/shot.png' })
+      writeFileSyncMock.mockImplementationOnce(() => {
+        throw new Error('disk full')
+      })
+      await service.save({ pngBytes: PNG_BYTES })
+
+      await service.startCapture(undefined, { submit: () => Promise.reject(new Error('gone')), dispose: () => {} })
+      await expect(service.submitResult({ pngBytes: PNG_BYTES, text: '' })).rejects.toThrow('gone')
+
+      expect(statuses()).toEqual(['error', 'error', 'error', 'error'])
     })
 
     it('still dismisses the overlays when the clipboard write throws', async () => {

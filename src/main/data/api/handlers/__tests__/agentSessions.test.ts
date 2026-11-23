@@ -36,7 +36,7 @@ vi.mock('@data/services/AgentSessionService', () => ({
 vi.mock('@data/services/AgentService', () => ({ agentService: { getAgent: getAgentMock } }))
 vi.mock('@application', async () => {
   const { mockApplicationFactory } = await import('@test-mocks/main/application')
-  return mockApplicationFactory({ AnalyticsService: { trackProductEvent: trackProductEventMock } } as never)
+  return mockApplicationFactory({ AnalyticsService: { trackProductEvent: trackProductEventMock } })
 })
 
 import { agentSessionHandlers } from '../agentSessions'
