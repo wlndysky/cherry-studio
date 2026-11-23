@@ -1,7 +1,9 @@
 import * as z from 'zod'
 
 import { type AiFailureReason, aiFailureReasonSchema } from '@cherrystudio/remote-protocol/failure'
+import type { BuiltinAgentRole } from '@shared/ai/builtinAgent'
 import type { ScheduleKind } from '@shared/ai/scheduleTrigger'
+import type { AgentChannelType } from '@shared/data/api/schemas/agentChannels'
 import type { AgentPermissionMode, AgentType } from '@shared/data/api/schemas/agents'
 import type { ReasoningEffortOption } from '@shared/types/aiSdk'
 import type { DoctorCheckId, DoctorRunTier } from '@shared/types/doctor'
@@ -53,6 +55,7 @@ export const featureErrorReasonSchema = z.enum([
   'persist_failed',
   'unsupported_format',
   'invalid_format',
+  'url_unreachable',
   'other'
 ])
 export type FeatureErrorReason = z.infer<typeof featureErrorReasonSchema>
@@ -335,6 +338,11 @@ export const rendererAnalyticsEventSchema = z.discriminatedUnion('event', [
     event: z.literal('translate_history_used'),
     action: z.enum(['opened', 'reused', 'cleared', 'starred'])
   }),
+  // The update dialog closed without installing: the Later button, or dismissed.
+  z.strictObject({
+    event: z.literal('update_install_deferred'),
+    choice: z.enum(['later', 'dismissed'])
+  }),
   // `group` is the static result group of the picked item.
   z.strictObject({
     event: z.literal('global_search_used'),
@@ -378,6 +386,8 @@ export type MainAnalyticsEvent =
       errorReason?: Exclude<TransferFailureReason, 'config'> | 'checksum' | 'signature'
     }
   | { event: 'update_install_started' }
+  // The installer reported an error after an install started.
+  | { event: 'update_install_failed'; errorReason: Exclude<TransferFailureReason, 'config'> | 'checksum' | 'signature' }
   | {
       event: 'backup_run'
       target: BackupAnalyticsTarget
@@ -460,9 +470,12 @@ export type MainAnalyticsEvent =
       origin: 'ui' | 'agent_tool'
       frequency: ScheduleKind
       agentKind: 'builtin' | 'custom'
+      builtinRole?: BuiltinAgentRole
       hasWorkspace: boolean
       reuseSession: boolean
       channelCount: number
+      // The schedule's random local id, to follow one task across days.
+      taskId: string
     }
   | {
       event: 'scheduled_task_run'
@@ -474,6 +487,15 @@ export type MainAnalyticsEvent =
       channelCount: number
       // This failure made the circuit breaker pause the schedule.
       autoPaused?: boolean
+      taskId: string
+    }
+  // One per channel chat a scheduled task's result or failure notice was sent to.
+  | {
+      event: 'scheduled_task_delivery'
+      taskId: string
+      channelType: AgentChannelType
+      content: 'result' | 'failure_notice'
+      status: 'success' | 'error'
     }
   | ({
       event: 'scheduled_task_snapshot'

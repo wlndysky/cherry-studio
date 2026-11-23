@@ -359,6 +359,22 @@ describe('AppUpdaterService — auto update-check scheduling', () => {
       expect(updateEvents()).toEqual([{ event: 'update_downloaded', status: 'error', errorReason: 'other' }])
     })
 
+    it('reports an install that fails after it started, with the reason', async () => {
+      listener('update-available')(release)
+      listener('update-downloaded')(release)
+      appUpdater.quitAndInstall()
+      listener('error')(
+        Object.assign(new Error('Code signature did not pass validation'), { code: 'ERR_UPDATER_INVALID_SIGNATURE' })
+      )
+      // A later, unrelated error is not another install failure.
+      listener('error')(new Error('later check failed'))
+
+      expect(updateEvents().filter(({ event }) => event.startsWith('update_install'))).toEqual([
+        { event: 'update_install_started' },
+        { event: 'update_install_failed', errorReason: 'signature' }
+      ])
+    })
+
     it('names why a download failed by kind, never by its message', async () => {
       const failures: Array<[Error, string]> = [
         [Object.assign(new Error('sha512 checksum mismatch'), { code: 'ERR_CHECKSUM_MISMATCH' }), 'checksum'],

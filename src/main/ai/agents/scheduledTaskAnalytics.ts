@@ -2,8 +2,9 @@ import { agentChannelService } from '@data/services/AgentChannelService'
 import { HEARTBEAT_PROMPT_SENTINEL } from '@data/services/AgentTaskService'
 import { jobService } from '@data/services/JobService'
 import type { JobSettledEvent } from '@main/core/job/types'
-import { analyticsAgentKind, trackMainProductEvent } from '@main/services/productAnalytics'
+import { analyticsBuiltinRole, trackMainProductEvent } from '@main/services/productAnalytics'
 import { triggerToFormState } from '@shared/ai/scheduleTrigger'
+import type { AgentChannelType } from '@shared/data/api/schemas/agentChannels'
 import type { ScheduledTaskEntity } from '@shared/data/api/schemas/agents'
 import { AGENT_WORKSPACE_TYPE } from '@shared/data/api/schemas/agentWorkspaces'
 
@@ -17,15 +18,18 @@ export function trackScheduledTaskChanged(
   origin: ScheduledTaskChangeOrigin
 ): void {
   try {
+    const builtinRole = analyticsBuiltinRole(task.agentId)
     trackMainProductEvent({
       event: 'scheduled_task_changed',
       action,
       origin,
       frequency: triggerToFormState(task.trigger).kind,
-      agentKind: analyticsAgentKind(task.agentId),
+      agentKind: builtinRole ? 'builtin' : 'custom',
+      ...(builtinRole && { builtinRole }),
       hasWorkspace: task.workspace.type !== AGENT_WORKSPACE_TYPE.SYSTEM,
       reuseSession: task.reuseSession,
-      channelCount: task.channelIds?.length ?? 0
+      channelCount: task.channelIds?.length ?? 0,
+      taskId: task.id
     })
   } catch {
     // Reading the task's agent must not fail the command.
@@ -79,9 +83,26 @@ export function trackScheduledTaskRun(event: JobSettledEvent<AgentTaskInput>, au
       run,
       ...(durationMs !== undefined && Number.isFinite(durationMs) && { durationMs }),
       channelCount: agentChannelService.getSubscribedChannels(event.scheduleId).length,
-      ...(autoPaused && { autoPaused })
+      ...(autoPaused && { autoPaused }),
+      taskId: event.scheduleId
     })
   } catch {
     // Run bookkeeping must not fail the job's settle hook.
   }
+}
+
+/** Whether one channel chat received a task's result or its failure notice. */
+export function trackScheduledTaskDelivery(
+  taskId: string,
+  channelType: AgentChannelType,
+  content: 'result' | 'failure_notice',
+  delivered: boolean
+): void {
+  trackMainProductEvent({
+    event: 'scheduled_task_delivery',
+    taskId,
+    channelType,
+    content,
+    status: delivered ? 'success' : 'error'
+  })
 }
