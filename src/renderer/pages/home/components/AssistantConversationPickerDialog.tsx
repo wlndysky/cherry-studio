@@ -13,6 +13,7 @@ import {
 import { ConversationPickerDialog, type ConversationPickerItem } from '@renderer/components/resourceCatalog/selectors'
 import { useMutation } from '@renderer/data/hooks/useDataApi'
 import { type AssistantCatalogPreset, useAssistantCatalogPresets } from '@renderer/hooks/useAssistantCatalogPresets'
+import { trackAssistantCreated } from '@renderer/services/productAnalytics'
 import type { Assistant } from '@renderer/types/assistant'
 import { buildCreateAssistantDto } from '@renderer/utils/resourceCatalog'
 import { cn } from '@renderer/utils/style'
@@ -128,6 +129,7 @@ export function AssistantConversationPickerDialog({
         const created = await createAssistant({
           body: buildCreateAssistantDto(values)
         })
+        trackAssistantCreated('blank')
         setCreateDialogOpen(false)
         // Start a conversation with the new assistant so it surfaces in the rail (a fresh assistant
         // has no topic yet), mirroring picking an existing one.

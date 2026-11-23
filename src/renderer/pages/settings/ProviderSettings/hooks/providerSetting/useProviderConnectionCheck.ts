@@ -12,9 +12,11 @@ import { HealthStatus } from '@renderer/pages/settings/ProviderSettings/types/he
 import {
   aggregateApiKeyResults,
   checkModelWithMultipleKeys,
-  ModelCheckCredentialsError
+  ModelCheckCredentialsError,
+  modelCheckErrorCategory
 } from '@renderer/pages/settings/ProviderSettings/utils/healthCheck'
 import { enableProviderWhenModelsAvailable } from '@renderer/pages/settings/ProviderSettings/utils/providerEnablement'
+import { trackProviderCheck } from '@renderer/services/productAnalytics'
 import { toast } from '@renderer/services/toast'
 import type { Model } from '@shared/data/types/model'
 
@@ -79,6 +81,14 @@ export function useProviderConnectionCheck(providerId: string, credentialsState:
       const runId = ++runIdRef.current
       setIsSingleModelChecking(true)
       setSingleModelResult(null)
+      let keyCount = 0
+      const reportCheck = (error?: unknown) =>
+        trackProviderCheck({
+          surface: 'settings',
+          providerId,
+          keyCount,
+          ...(error !== undefined && { errorReason: modelCheckErrorCategory(error, providerId) })
+        })
       const reportFailure = (error: unknown) =>
         toast.errorFromException(error, {
           key: `provider-check:${providerId}`,
@@ -97,6 +107,7 @@ export function useProviderConnectionCheck(providerId: string, credentialsState:
 
         const keyResults = await checkModelWithMultipleKeys(model, credentials, 15000, controller.signal)
         if (runId !== runIdRef.current || controller.signal.aborted) return 'failed' as const
+        keyCount = keyResults.length
 
         const analysis = aggregateApiKeyResults(keyResults)
         const result: ModelWithStatus =
@@ -140,11 +151,13 @@ export function useProviderConnectionCheck(providerId: string, credentialsState:
         if (runId !== runIdRef.current || controller.signal.aborted) return 'failed' as const
 
         if (result.kind === 'ok') {
+          reportCheck()
           if (notify) toast.success({ timeout: 2000, title: i18n.t('message.api.connection.success') })
           return 'passed' as const
         }
         // Mixed failures use credential order; keep the aggregate for the results panel.
         const error = keyResults.find((keyResult) => keyResult.kind === 'failed')?.error ?? result.error
+        reportCheck(error ?? new Error('model check failed'))
         if (!notify) throw error ?? new Error(i18n.t('settings.models.check.failed_to_start'))
         reportFailure(error)
         return 'failed' as const
@@ -158,6 +171,7 @@ export function useProviderConnectionCheck(providerId: string, credentialsState:
           })
           return 'failed'
         }
+        if (keyCount === 0) reportCheck(error)
         if (!notify) throw error
         if (!(error instanceof ModelCheckCredentialsError)) {
           logger.error('Single model check failed', { providerId: provider.id, modelId: model.id, error })

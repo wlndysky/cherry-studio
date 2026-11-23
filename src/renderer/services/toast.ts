@@ -44,6 +44,8 @@ export interface ErrorToastContext {
   retryAfterSeconds?: number
   actions?: Partial<Record<ErrorToastAction, () => void | boolean | Promise<void | boolean>>>
   isCurrent?: () => boolean
+  /** Called when the user takes the toast's recovery action. */
+  onAction?: (action: ErrorToastAction, category: ErrorCategory) => void
 }
 
 function errorFromException(error: unknown, context: ErrorToastContext = {}): string {
@@ -100,6 +102,7 @@ function errorFromException(error: unknown, context: ErrorToastContext = {}): st
             onClick: async () => {
               if (running || context.isCurrent?.() === false) return
               running = true
+              context.onAction?.(actionKind, category)
               const tracksCompletion = actionKind === 'retry' || actionKind === 'trimContext'
               if (tracksCompletion) notifications.loading({ key })
               const pending = notifications.getToastQueue().toasts.find((item) => item.key === key)

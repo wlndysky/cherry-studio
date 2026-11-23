@@ -10,6 +10,7 @@ import { OpenTargetButton } from '@renderer/components/OpenTarget'
 import { type ResourceEditDialogTarget } from '@renderer/components/resourceCatalog/dialogs/edit'
 import { AgentSelector, WorkspaceSelector } from '@renderer/components/resourceCatalog/selectors'
 import { useProviderDisplayName } from '@renderer/hooks/useProvider'
+import { trackModelSelected } from '@renderer/services/productAnalytics'
 import { getProviderDisplayNameById } from '@renderer/utils/naming'
 import { cn } from '@renderer/utils/style'
 import type { AgentWorkspaceEntity } from '@shared/data/api/schemas/agentWorkspaces'
@@ -192,7 +193,10 @@ function ModelControl({
       multiple={false}
       includeAgentOnlyModels
       value={model}
-      onSelect={onModelSelect}
+      onSelect={(nextModel: Model | undefined) => {
+        onModelSelect(nextModel)
+        if (nextModel) trackModelSelected('agent', [nextModel])
+      }}
       filter={modelFilter}
       shortcut={canChangeModel ? 'chat.model.select' : undefined}
       side={side}

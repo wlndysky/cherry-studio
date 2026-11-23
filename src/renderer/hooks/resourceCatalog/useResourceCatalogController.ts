@@ -9,6 +9,7 @@ import { useCloseConversationTabs } from '@renderer/hooks/tab'
 import { useAssistantMutations } from '@renderer/hooks/useAssistant'
 import { useGroupMutations, useGroups } from '@renderer/hooks/useGroups'
 import { ipcApi } from '@renderer/ipc'
+import { trackAssistantCreated } from '@renderer/services/productAnalytics'
 import { restoreRecycleBinItems, showRecycleBinBatchUndo } from '@renderer/services/recycleBinFeedback'
 import { toast } from '@renderer/services/toast'
 import type {
@@ -169,6 +170,7 @@ export function useResourceCatalogController(
       if (resource.type === 'assistant') {
         try {
           await duplicateAssistant(resource.raw)
+          trackAssistantCreated('duplicate')
           refetch()
         } catch (error) {
           toast.error(error instanceof Error ? error.message : t('library.duplicate_assistant_failed'))
@@ -335,6 +337,7 @@ export function useResourceCatalogController(
       try {
         if (kind === 'assistant') {
           await createAssistant(buildCreateAssistantDto(values))
+          trackAssistantCreated('blank')
         } else {
           await createAgent(buildCreateAgentCommand(values))
         }

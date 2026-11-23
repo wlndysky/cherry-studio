@@ -31,6 +31,7 @@ import { assistantDataService } from '@data/services/AssistantService'
 import { jobService } from '@data/services/JobService'
 import { providerRegistryService } from '@data/services/ProviderRegistryService'
 import { loggerService } from '@logger'
+import { serializeError } from '@main/ai/utils/serializeError'
 import type { JobHandle } from '@main/core/job/types'
 import { BaseService, DependsOn, Injectable, Phase, ServicePhase } from '@main/core/lifecycle'
 import { messageService } from '@main/data/services/MessageService'
@@ -40,6 +41,7 @@ import { analyticsModelSource, trackMainProductEvent } from '@main/services/prod
 import { installBuiltinSkills } from '@main/utils/builtinSkills'
 import { downloadImageAsBase64 } from '@main/utils/downloadAsBase64'
 import type { CompactionSink } from '@shared/ai/compaction'
+import { toExecutionFailure } from '@shared/ai/executionFailure'
 import { createPaintingGenerateError } from '@shared/ai/paintingGenerateError'
 import {
   isSeedream5xTargetModel,
@@ -1069,12 +1071,15 @@ export class AiService extends BaseService {
     // Paintings is this route's only caller; a user cancel is not an outcome.
     let requestSignal: AbortSignal | undefined
     const providerId = payload.uniqueModelId && parseUniqueModelId(payload.uniqueModelId).providerId
-    const report = (status: 'success' | 'error', count?: number) =>
+    const report = (status: 'success' | 'error', count?: number, error?: unknown) =>
       trackMainProductEvent({
         event: 'feature_used',
         feature: 'paintings',
         action: 'image_generated',
         status,
+        ...(error !== undefined && {
+          errorReason: toExecutionFailure(serializeError(error), payload.uniqueModelId).failure.reasonCode
+        }),
         ...(providerId && { modelSource: analyticsModelSource(providerId) }),
         // Custom provider ids are user-chosen, so only system providers are named.
         ...(providerId && isSystemProviderId(providerId) && { target: providerId }),
@@ -1088,7 +1093,7 @@ export class AiService extends BaseService {
       report(result.files.length > 0 ? 'success' : 'error', result.files.length)
       return result
     } catch (error) {
-      if (!requestSignal?.aborted) report('error')
+      if (!requestSignal?.aborted) report('error', undefined, error)
       throw error
     }
   }

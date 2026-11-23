@@ -6,6 +6,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import enUS from '@renderer/i18n/locales/en-us.json'
 import zhCN from '@renderer/i18n/locales/zh-cn.json'
 import type { SerializedError } from '@renderer/types/error'
+import type { RendererAnalyticsEvent } from '@shared/ipc/schemas/analytics'
 
 import type { MessageListActions, MessageListItem } from '../../types'
 
@@ -674,6 +675,57 @@ required service tier.`
 
     fireEvent.click(screen.getByText(GO_TO_SETTINGS_LABEL))
     expect(navigateErrorTarget).toHaveBeenCalledWith('/settings/provider?id=openai')
+  })
+
+  it('reports what the user did with a failed reply by its error category, never its text', async () => {
+    const request = vi.mocked(window.api.ipcApi.request)
+    request.mockClear()
+    mocks.actions = {
+      openErrorDetail: vi.fn(),
+      removeMessageErrorPart: vi.fn().mockResolvedValue(undefined),
+      navigateErrorTarget: vi.fn()
+    }
+    const { container } = render(
+      <ErrorBlock
+        partId="message-1-part-0"
+        error={{ name: 'AuthError', message: 'Unauthorized sk-secret', stack: null, status: 401, providerId: 'openai' }}
+        message={{ ...message, topicId: 'agent-session:s1' }}
+      />
+    )
+
+    fireEvent.click(container.firstElementChild as Element)
+    fireEvent.click(screen.getByText(GO_TO_SETTINGS_LABEL))
+    fireEvent.click(screen.getByLabelText('close'))
+
+    await waitFor(() =>
+      expect(
+        request.mock.calls
+          .filter(([route]) => route === 'analytics.track')
+          .map(([, event]) => event as RendererAnalyticsEvent)
+      ).toEqual([
+        { event: 'chat_error_action', action: 'detail', reason: 'auth', surface: 'agent' },
+        { event: 'chat_error_action', action: 'open_settings', reason: 'auth', surface: 'agent' },
+        { event: 'chat_error_action', action: 'dismiss', reason: 'auth', surface: 'agent' }
+      ])
+    )
+  })
+
+  it('does not report a dismissal that failed', async () => {
+    const request = vi.mocked(window.api.ipcApi.request)
+    request.mockClear()
+    mocks.actions = { removeMessageErrorPart: vi.fn().mockRejectedValue(new Error('locked')), notifyError: vi.fn() }
+    render(
+      <ErrorBlock
+        partId="message-1-part-0"
+        error={{ name: 'AuthError', message: 'Unauthorized', stack: null, status: 401 }}
+        message={message}
+      />
+    )
+
+    fireEvent.click(screen.getByLabelText('close'))
+
+    await waitFor(() => expect(mocks.actions.notifyError).toHaveBeenCalled())
+    expect(request.mock.calls.filter(([route]) => route === 'analytics.track')).toEqual([])
   })
 
   it('offers provider settings recovery when a retry error wraps a 401', () => {

@@ -179,6 +179,8 @@ export interface StreamExecution {
   /** Resolves when the execution loop terminates. Awaited by `onStop` for graceful shutdown. */
   loopPromise: Promise<void>
   timings: TransportTimings
+  /** `performance.now()` of the first text or reasoning delta, for analytics. */
+  firstTokenAt?: number
   runtimeTiming: MessageRuntimeTimingCollector
   /** OTel root span set as active context around `runExecutionLoop`. */
   rootSpan?: Span

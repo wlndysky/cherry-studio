@@ -36,6 +36,7 @@ import { useConversationShellPaneState } from '@renderer/hooks/useConversationSh
 import { useModelById } from '@renderer/hooks/useModel'
 import { mapApiTopicToRendererTopic, useActiveTopic, useTopicMutations } from '@renderer/hooks/useTopic'
 import { EVENT_NAMES, EventEmitter } from '@renderer/services/EventService'
+import { trackAssistantCreated } from '@renderer/services/productAnalytics'
 import type { ResourceListRevealPayload } from '@renderer/services/resourceListRevealEvents'
 import { toast } from '@renderer/services/toast'
 import type { AppRouter } from '@renderer/types/router'
@@ -377,7 +378,9 @@ const HomePage: FC = () => {
       const existing = assistants.find((assistant) => assistant.name === presetName)
       if (existing) return existing.id
 
-      return (await addAssistant(toCreateAssistantDtoFromCatalogPreset(selection.preset))).id
+      const created = await addAssistant(toCreateAssistantDtoFromCatalogPreset(selection.preset))
+      trackAssistantCreated('library', selection.preset.id)
+      return created.id
     },
     [addAssistant, assistants]
   )

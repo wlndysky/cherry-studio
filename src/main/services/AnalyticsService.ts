@@ -4,6 +4,7 @@ import type { PostHog } from 'posthog-node'
 import { application } from '@application'
 import type { AnalyticsClient, TokenUsageData } from '@cherrystudio/analytics-client'
 import { isMigratedFromV1 } from '@data/migration/v1MigrationOrigin'
+import { assistantDataService } from '@data/services/AssistantService'
 import { messageService } from '@data/services/MessageService'
 import { loggerService } from '@logger'
 import { createLatestReconciler, type LatestReconciler } from '@main/core/concurrency/latestReconciler'
@@ -14,8 +15,10 @@ import { generateUserAgent, getClientId } from '@main/utils/systemInfo'
 import { DefaultPreferences } from '@shared/data/preference/preferenceSchemas'
 import type { UnifiedPreferenceKeyType } from '@shared/data/preference/preferenceTypes'
 import { STORED_FILE_REF_PREFIX } from '@shared/data/types/file'
+import { parseUniqueModelId, type UniqueModelId } from '@shared/data/types/model'
 import { BEHAVIOR_ANALYTICS_EVENTS, type ProductAnalyticsEvent } from '@shared/ipc/schemas/analytics'
 import type { AppEdition } from '@shared/types/appEdition'
+import { analyticsModelSource } from '@shared/utils/analyticsModelSource'
 import { APP_NAME } from '@shared/utils/constants'
 
 import { restoreKeptClientId, takePendingReports } from './analyticsPendingReports'
@@ -37,6 +40,14 @@ const MAX_PENDING_PRODUCT_EVENTS = 200
 const SETTING_CHANGE_COALESCE_MS = 2_000
 const SNAPSHOT_CHECK_INTERVAL_MS = 60 * 60_000
 const USER_AVATAR_KEY = 'app.user.avatar'
+// Model choices report where the model comes from, never the model or a user-created provider.
+const MODEL_ID_SETTING_KEYS: ReadonlySet<string> = new Set([
+  'chat.default_model_id',
+  'chat.context_settings.compress.model_id',
+  'feature.paintings.default_model_id',
+  'feature.quick_assistant.model_id',
+  'feature.translate.model_id'
+])
 
 type SettingsSnapshotEvent = Extract<ProductAnalyticsEvent, { event: 'settings_snapshot' }>
 
@@ -80,6 +91,11 @@ function settingsSnapshot(read: (key: UnifiedPreferenceKeyType) => unknown): Set
         : String(value).startsWith(STORED_FILE_REF_PREFIX)
           ? 'image'
           : 'emoji'
+    } else if (MODEL_ID_SETTING_KEYS.has(key)) {
+      event[`setting:${key}`] =
+        typeof value === 'string' && value.includes('::')
+          ? analyticsModelSource(parseUniqueModelId(value as UniqueModelId).providerId)
+          : 'none'
     } else if (kind === 'text') {
       event[`setting:${key}`] = (value ?? '') !== (defaults[key] ?? '')
     } else {
@@ -368,6 +384,11 @@ export class AnalyticsService extends BaseService implements Activatable {
       this.trackProductEvent({ event: 'chat_branch_snapshot', ...messageService.countTopicBranches() })
     } catch (error) {
       logger.warn('Branch snapshot skipped', error as Error)
+    }
+    try {
+      this.trackProductEvent({ event: 'assistant_snapshot', ...assistantDataService.countConfiguredForAnalytics() })
+    } catch (error) {
+      logger.warn('Assistant snapshot skipped', error as Error)
     }
   }
 

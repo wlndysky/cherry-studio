@@ -36,6 +36,7 @@ import ImageViewer from '@renderer/components/ImageViewer'
 import { LazyCodeEditor } from '@renderer/components/LazyCodeEditor'
 import type { BasicPreviewHandles } from '@renderer/components/Preview/types'
 import { useCodeStyle } from '@renderer/hooks/useCodeStyle'
+import { trackCodeBlockAction } from '@renderer/services/productAnalytics'
 import { pyodideService } from '@renderer/services/PyodideService'
 import { toast } from '@renderer/services/toast'
 import { getExtensionByLanguage } from '@renderer/utils/codeLanguage'
@@ -142,7 +143,14 @@ export const CodeBlockView: React.FC<Props> = memo((props) => {
     return viewState.mode
   }, [canEdit, hasSpecialView, viewState.mode])
 
+  // Only languages with a built-in special view are named in analytics.
+  const analyticsLanguageRef = useRef<string | undefined>(undefined)
+  useLayoutEffect(() => {
+    analyticsLanguageRef.current = hasSpecialView ? language : undefined
+  }, [hasSpecialView, language])
+
   const setViewMode = useCallback((newMode: ViewMode) => {
+    trackCodeBlockAction('view_mode', analyticsLanguageRef.current)
     setViewState((current) => ({
       mode: newMode,
       // 当新模式不是 'split' 时才更新
@@ -151,6 +159,7 @@ export const CodeBlockView: React.FC<Props> = memo((props) => {
   }, [])
 
   const toggleSplitView = useCallback(() => {
+    trackCodeBlockAction('view_mode', analyticsLanguageRef.current)
     setViewState((current) => {
       // 如果当前是 split 模式，恢复到上一个模式
       if (current.mode === 'split') {
@@ -224,6 +233,7 @@ export const CodeBlockView: React.FC<Props> = memo((props) => {
         latestActionContextRef.current.stateRef.current?.sliceDoc() ??
         latestActionContextRef.current.source
       await navigator.clipboard.writeText(content)
+      trackCodeBlockAction('copy', analyticsLanguageRef.current)
       toast.success(latestActionContextRef.current.t('code_block.copy.success'))
       return true
     } catch (error) {
@@ -252,6 +262,7 @@ export const CodeBlockView: React.FC<Props> = memo((props) => {
     }
 
     const ext = getExtensionByLanguage(currentLanguage)
+    trackCodeBlockAction('download', analyticsLanguageRef.current)
     void window.api.file.save(`${fileName}${ext}`, currentSource)
   }, [])
 
@@ -262,6 +273,7 @@ export const CodeBlockView: React.FC<Props> = memo((props) => {
       latestActionContextRef.current.source
     setIsRunning(true)
     setExecutionResult(null)
+    trackCodeBlockAction('run')
 
     pyodideService
       .runScript(source, {}, codeExecutionTimeoutMinutes * 60000)
