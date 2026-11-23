@@ -73,6 +73,11 @@ export function memoryFactText(line: string): string {
   }
 }
 
+/** Keep continuation lines attached to their Markdown item. */
+export function memoryItems(text: string): string[] {
+  return text.split(/\n(?=(?:[-*+]\s|#{1,6}\s|$))/)
+}
+
 export function matchesMemoryQuote(line: string, quote: string): boolean {
   const fact = memoryFactText(line)
   return line.trim() === quote || fact === quote || fact === memoryFactText(quote)
@@ -94,8 +99,7 @@ export function reviseMemory(
     for (let index = 0; index < parts.length; index++) {
       const part = parts[index]
       if (typeof part !== 'string') continue
-      parts[index] = part
-        .split('\n')
+      parts[index] = memoryItems(part)
         .map((line) => {
           if (!matchesMemoryQuote(line, revision.quote)) return line
           replacedText = memoryFactText(line)
@@ -259,8 +263,7 @@ export function memoryModelView(
     .map((part) => {
       if (typeof part === 'string')
         return purpose === 'current'
-          ? part
-              .split('\n')
+          ? memoryItems(part)
               .filter((line) => !retiredFacts.has(memoryFactText(line)))
               .join('\n')
           : part
